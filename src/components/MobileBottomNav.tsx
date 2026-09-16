@@ -323,10 +323,12 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         setRawImage(dataUrl);
         setRotation(0);
 
+        // Turn off camera hardware immediately upon capturing photo frame
+        stopCamera();
+
         // Adobe Scan Shutter Flash trigger
         setIsScanningFlash(true);
         setTimeout(() => {
-          stopCamera();
           setStep(2);
           setIsScanningFlash(false);
         }, 320);
