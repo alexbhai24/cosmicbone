@@ -9,7 +9,8 @@ export interface GeminiScanResult {
 }
 
 export async function processImageWithGemini(base64Image: string, apiKey: string, mode: 'doc' | 'question'): Promise<GeminiScanResult> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const modelName = import.meta.env.VITE_BONE_AI_MODEL || 'gemini-1.5-flash';
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
   // Remove the data URI prefix if it exists
   const base64Data = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
