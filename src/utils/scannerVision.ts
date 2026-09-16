@@ -105,6 +105,21 @@ export function detectDocumentCorners(
     const borderMarginX = Math.floor(sw * 0.03);
     const borderMarginY = Math.floor(sh * 0.03);
 
+    const gradients = new Int32Array(sw * sh);
+    let maxGrad = 0;
+
+    for (let y = borderMarginY; y < sh - borderMarginY; y++) {
+      for (let x = borderMarginX; x < sw - borderMarginX; x++) {
+        const gx = gray[y * sw + (x + 1)] - gray[y * sw + (x - 1)];
+        const gy = gray[(y + 1) * sw + x] - gray[(y - 1) * sw + x];
+        const grad = Math.abs(gx) + Math.abs(gy);
+        gradients[y * sw + x] = grad;
+        if (grad > maxGrad) maxGrad = grad;
+      }
+    }
+
+    const adaptiveThreshold = Math.max(36, maxGrad * 0.35); // Keep the strongest 65% of edges
+
     const edgePoints: Point[] = [];
     let minSum = Infinity, maxSum = -Infinity;
     let minDiff = Infinity, maxDiff = -Infinity;
@@ -115,11 +130,9 @@ export function detectDocumentCorners(
 
     for (let y = borderMarginY; y < sh - borderMarginY; y++) {
       for (let x = borderMarginX; x < sw - borderMarginX; x++) {
-        const gx = gray[y * sw + (x + 1)] - gray[y * sw + (x - 1)];
-        const gy = gray[(y + 1) * sw + x] - gray[(y - 1) * sw + x];
-        const grad = Math.abs(gx) + Math.abs(gy);
+        const grad = gradients[y * sw + x];
 
-        if (grad > 36) {
+        if (grad > adaptiveThreshold) {
           edgePoints.push({ x, y });
 
           const sum = x + y;
@@ -133,13 +146,14 @@ export function detectDocumentCorners(
       }
     }
 
-    if (edgePoints.length > 25) {
+    if (edgePoints.length > 20) {
       const boxW = Math.abs(ptTR.x - ptTL.x) * sampleScale;
       const boxH = Math.abs(ptBL.y - ptTL.y) * sampleScale;
       const frameArea = width * height;
       const areaPct = (boxW * boxH) / frameArea;
 
-      if (areaPct >= 0.10 && areaPct <= 0.88) {
+      // Allow documents to fill up to 96% of the screen (previously 88% rejected large books)
+      if (areaPct >= 0.08 && areaPct <= 0.96) {
         return sortQuadCorners([
           { x: ptTL.x * sampleScale, y: ptTL.y * sampleScale },
           { x: ptTR.x * sampleScale, y: ptTR.y * sampleScale },
