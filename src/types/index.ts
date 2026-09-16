@@ -37,6 +37,7 @@ export type Theme =
   | 'white';
 
 export type BackgroundType =
+  | 'app-bg'
   | 'lighthouse'
   | 'snowy-tree'
   | 'canyon-castle'

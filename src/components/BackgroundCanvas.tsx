@@ -2,6 +2,7 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 
 const BG_MAP: Record<string, string> = {
+  'app-bg':        '/app-bg.jpg',
   'lighthouse':    '/bg_lighthouse.jpg',
   'snowy-tree':    '/bg_snowy_tree.jpg',
   'canyon-castle': '/bg_canyon_castle.jpg',
@@ -13,7 +14,7 @@ const BG_MAP: Record<string, string> = {
 export const BackgroundCanvas: React.FC = () => {
   const { background } = useApp();
 
-  const src = BG_MAP[background] ?? BG_MAP['lighthouse'];
+  const src = BG_MAP[background] ?? BG_MAP['app-bg'];
 
   return (
     <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none bg-[var(--bg-app)] no-theme-override" style={{ transition: 'background-color 0.5s ease' }}>

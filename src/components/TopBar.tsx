@@ -90,6 +90,7 @@ export const TopBar: React.FC = () => {
   ];
 
   const bgSequence: BackgroundType[] = [
+    'app-bg',
     'lighthouse',
     'snowy-tree',
     'canyon-castle',
@@ -99,6 +100,7 @@ export const TopBar: React.FC = () => {
   ];
 
   const bgLabels: Record<BackgroundType, string> = {
+    'app-bg': 'App Background',
     'lighthouse': 'Lighthouse',
     'snowy-tree': 'Snowy Tree',
     'canyon-castle': 'Canyon Castle',

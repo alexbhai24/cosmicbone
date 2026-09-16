@@ -159,7 +159,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [background, setBackgroundState] = useState<BackgroundType>(() => {
-    return (localStorage.getItem('cosmicbone_bg') as BackgroundType) || 'lighthouse';
+    return (localStorage.getItem('cosmicbone_bg') as BackgroundType) || 'app-bg';
   });
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(true);
