@@ -35,7 +35,6 @@ import {
   DetectedBlock,
   QuadCorners
 } from '../utils/scannerVision';
-import { processImageWithGemini } from '../utils/geminiScanner';
 
 interface NavItem {
   id: PageRoute;
@@ -350,58 +349,14 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           return;
         }
 
-        // --- GEMINI AI SCANNING INTEGRATION ---
-        if (!navigator.onLine) {
-          alert('You are currently offline. Internet connection is required for AI Scanning.');
-          setStep(1); // Go back to camera
-          return;
-        }
-
-        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-        if (!apiKey) {
-          alert('Gemini API Key is missing in .env (VITE_GEMINI_API_KEY).');
-          setStep(1);
-          return;
-        }
-
-        try {
-          setIsAILoading(true);
-          const result = await processImageWithGemini(dataUrl, apiKey, scanMode);
-          
-          if (result.corners) {
-             setQuadCorners({
-                topLeft: { x: Math.max(0.01, Math.min(0.99, result.corners.topLeft.x)), y: Math.max(0.01, Math.min(0.99, result.corners.topLeft.y)) },
-                topRight: { x: Math.max(0.01, Math.min(0.99, result.corners.topRight.x)), y: Math.max(0.01, Math.min(0.99, result.corners.topRight.y)) },
-                bottomRight: { x: Math.max(0.01, Math.min(0.99, result.corners.bottomRight.x)), y: Math.max(0.01, Math.min(0.99, result.corners.bottomRight.y)) },
-                bottomLeft: { x: Math.max(0.01, Math.min(0.99, result.corners.bottomLeft.x)), y: Math.max(0.01, Math.min(0.99, result.corners.bottomLeft.y)) }
-             });
-          } else {
-             // Fallback
-             setQuadCorners({
-                topLeft: { x: 0.05, y: 0.08 },
-                topRight: { x: 0.95, y: 0.08 },
-                bottomRight: { x: 0.95, y: 0.92 },
-                bottomLeft: { x: 0.05, y: 0.92 }
-             });
-          }
-
-          if (result.text) {
-             setNote(result.text); // Pre-fill the extracted text!
-          }
-
-        } catch (err: any) {
-          console.error('AI Scanning failed:', err);
-          alert(`AI Scanning failed: ${err.message || err}. Using default corners.`);
-          setQuadCorners({
-            topLeft: { x: 0.05, y: 0.08 },
-            topRight: { x: 0.95, y: 0.08 },
-            bottomRight: { x: 0.95, y: 0.92 },
-            bottomLeft: { x: 0.05, y: 0.92 }
-          });
-        } finally {
-          setIsAILoading(false);
-          setStep(2);
-        }
+        // NORMAL CAMERA FALLBACK (NO AI)
+        setQuadCorners({
+          topLeft: { x: 0.05, y: 0.08 },
+          topRight: { x: 0.95, y: 0.08 },
+          bottomRight: { x: 0.95, y: 0.92 },
+          bottomLeft: { x: 0.05, y: 0.92 }
+        });
+        setStep(2);
       }
     }
   };
@@ -428,55 +383,14 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         return;
       }
 
-      if (!navigator.onLine) {
-        alert('You are currently offline. Internet connection is required for AI Scanning.');
-        setStep(1);
-        return;
-      }
-
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) {
-        alert('Gemini API Key is missing in .env (VITE_GEMINI_API_KEY).');
-        setStep(1);
-        return;
-      }
-
-      try {
-        setIsAILoading(true);
-        const result = await processImageWithGemini(dataUrl, apiKey, scanMode);
-        
-        if (result.corners) {
-           setQuadCorners({
-              topLeft: { x: Math.max(0.01, Math.min(0.99, result.corners.topLeft.x)), y: Math.max(0.01, Math.min(0.99, result.corners.topLeft.y)) },
-              topRight: { x: Math.max(0.01, Math.min(0.99, result.corners.topRight.x)), y: Math.max(0.01, Math.min(0.99, result.corners.topRight.y)) },
-              bottomRight: { x: Math.max(0.01, Math.min(0.99, result.corners.bottomRight.x)), y: Math.max(0.01, Math.min(0.99, result.corners.bottomRight.y)) },
-              bottomLeft: { x: Math.max(0.01, Math.min(0.99, result.corners.bottomLeft.x)), y: Math.max(0.01, Math.min(0.99, result.corners.bottomLeft.y)) }
-           });
-        } else {
-           setQuadCorners({
-              topLeft: { x: 0.05, y: 0.08 },
-              topRight: { x: 0.95, y: 0.08 },
-              bottomRight: { x: 0.95, y: 0.92 },
-              bottomLeft: { x: 0.05, y: 0.92 }
-           });
-        }
-
-        if (result.text) {
-           setNote(result.text);
-        }
-      } catch (err: any) {
-        console.error('AI Scanning failed:', err);
-        alert(`AI Scanning failed: ${err.message || err}. Using default corners.`);
-        setQuadCorners({
-          topLeft: { x: 0.05, y: 0.08 },
-          topRight: { x: 0.95, y: 0.08 },
-          bottomRight: { x: 0.95, y: 0.92 },
-          bottomLeft: { x: 0.05, y: 0.92 }
-        });
-      } finally {
-        setIsAILoading(false);
-        setStep(2);
-      }
+      // NORMAL CAMERA FALLBACK (NO AI)
+      setQuadCorners({
+        topLeft: { x: 0.05, y: 0.08 },
+        topRight: { x: 0.95, y: 0.08 },
+        bottomRight: { x: 0.95, y: 0.92 },
+        bottomLeft: { x: 0.05, y: 0.92 }
+      });
+      setStep(2);
     };
     reader.readAsDataURL(f);
   };
@@ -684,14 +598,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   </div>
                 )}
 
-                {/* AI Scanning Loading Overlay */}
-                {isAILoading && (
-                  <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-4">
-                    <ScanLine className="w-12 h-12 text-cyan-400 animate-spin" />
-                    <p className="text-white font-bold animate-pulse text-sm">Gemini AI Analyzing Document...</p>
-                    <p className="text-white/60 text-xs">Finding corners & extracting text</p>
-                  </div>
-                )}
+                {/* AI Scanning Loading Overlay (Removed) */}
 
                 {/* Corner Frame Guidelines */}
                 <div className="absolute inset-3 pointer-events-none z-30 transition-all duration-300 opacity-60">
