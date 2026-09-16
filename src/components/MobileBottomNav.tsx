@@ -27,6 +27,8 @@ import { syllabusNEET } from '../data/syllabusNEET';
 import { syllabusJEE } from '../data/syllabusJEE';
 import {
   detectDocumentCorners,
+  detectQuestionCorners,
+  verifyIsRealDocument,
   warpAndEnhanceDocument,
   segmentPageLayout,
   isDocumentOrTextPresent,
@@ -53,6 +55,8 @@ const NAV_ITEMS: NavItem[] = [
 const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
+  const stableCountRef = useRef(0);
+  const stableCenterRef = useRef({ x: 0, y: 0 });
 
   // 3-Step Flow: 1 = Live Camera Scanner, 2 = Interactive Crop Screen, 3 = Syllabus & Details
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -90,19 +94,35 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   // Lightbox View Image
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
+  // 3-Level Scanner Mode: 'off' (1:1 photo, zero lag), 'doc' (Document Quad Scanner), 'question' (Question AI Scanner)
+  const [scanMode, setScanMode] = useState<'off' | 'doc' | 'question'>('off');
+
+  const toggleScanMode = () => {
+    setScanMode(prev => {
+      if (prev === 'off') return 'doc';
+      if (prev === 'doc') return 'question';
+      return 'off';
+    });
+  };
+
   // Adobe Scan shutter flash & scanning trigger effect state
   const [isScanningFlash, setIsScanningFlash] = useState(false);
   const [autoScanEnabled, setAutoScanEnabled] = useState(false);
 
-  // Live real-time document auto-detection state
-  const [detectedBox, setDetectedBox] = useState<{
+  // Live corner identification quad state (4 blue corner dots)
+  const [detectedQuad, setDetectedQuad] = useState<{
     isDetected: boolean;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    confidence: number;
-  }>({ isDetected: false, x: 0.05, y: 0.08, w: 0.9, h: 0.82, confidence: 0 });
+    topLeft: { x: number; y: number };
+    topRight: { x: number; y: number };
+    bottomRight: { x: number; y: number };
+    bottomLeft: { x: number; y: number };
+  }>({
+    isDetected: false,
+    topLeft: { x: 0.05, y: 0.08 },
+    topRight: { x: 0.95, y: 0.08 },
+    bottomRight: { x: 0.95, y: 0.92 },
+    bottomLeft: { x: 0.05, y: 0.92 }
+  });
 
   // Aggressive camera hardware stream kill function
   const stopCamera = () => {
@@ -216,6 +236,64 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     };
   }, [step]);
 
+  // Live corner identification sampling loop (runs when step === 1 and scanMode !== 'off')
+  useEffect(() => {
+    if (step !== 1 || scanMode === 'off') {
+      setDetectedQuad(prev => ({ ...prev, isDetected: false }));
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      if (!videoRef.current) return;
+      const video = videoRef.current;
+      if (video.readyState < 2 || video.paused) return;
+
+      const vw = video.videoWidth || 640;
+      const vh = video.videoHeight || 480;
+      const sqSize = Math.min(vw, vh);
+      const cropX = Math.round((vw - sqSize) / 2);
+      const cropY = Math.round((vh - sqSize) / 2);
+
+      const sampleCanvas = document.createElement('canvas');
+      sampleCanvas.width = 160;
+      sampleCanvas.height = 160;
+      const ctx = sampleCanvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.drawImage(video, cropX, cropY, sqSize, sqSize, 0, 0, 160, 160);
+
+      const rawCorners = scanMode === 'question'
+        ? detectQuestionCorners(sampleCanvas)
+        : detectDocumentCorners(sampleCanvas, 0.05);
+
+      const isDefaultDoc = scanMode === 'doc' && rawCorners.topLeft.x === Math.round(160 * 0.05);
+      const isDefaultQuestion = scanMode === 'question' && rawCorners.topLeft.x === Math.round(160 * 0.08);
+
+      if (isDefaultDoc || isDefaultQuestion) {
+        stableCountRef.current = 0;
+        setDetectedQuad(prev => ({ ...prev, isDetected: false }));
+        return;
+      }
+
+      // Require consecutive valid frames to "lock on" so it takes time to correctly identify
+      stableCountRef.current += 1;
+
+      if (stableCountRef.current >= 3) { // Requires ~900ms of seeing a document to show corners
+        const w = 160;
+        const h = 160;
+        setDetectedQuad({
+          isDetected: true,
+          topLeft: { x: Math.max(0.01, Math.min(0.99, rawCorners.topLeft.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.topLeft.y / h)) },
+          topRight: { x: Math.max(0.01, Math.min(0.99, rawCorners.topRight.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.topRight.y / h)) },
+          bottomRight: { x: Math.max(0.01, Math.min(0.99, rawCorners.bottomRight.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.bottomRight.y / h)) },
+          bottomLeft: { x: Math.max(0.01, Math.min(0.99, rawCorners.bottomLeft.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.bottomLeft.y / h)) }
+        });
+      }
+    }, 300);
+
+    return () => clearInterval(intervalId);
+  }, [step, scanMode]);
+
   // Flashlight toggle handler
   const toggleFlashlight = async () => {
     if (stream) {
@@ -225,9 +303,13 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           const capabilities = (track as any).getCapabilities ? (track as any).getCapabilities() : {};
           if (capabilities?.torch) {
             await track.applyConstraints({ advanced: [{ torch: !flashlightOn }] as any });
+            setFlashlightOn(!flashlightOn);
+          } else {
+            alert('Flashlight (Torch) is not supported on this browser/device.');
+            setFlashlightOn(!flashlightOn); // Still toggle visually
           }
-          setFlashlightOn(!flashlightOn);
-        } catch {
+        } catch (err) {
+          alert('Failed to toggle flashlight: ' + (err as Error).message);
           setFlashlightOn(!flashlightOn);
         }
       }
@@ -294,8 +376,22 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       if (ctx) {
         ctx.drawImage(video, cropX, cropY, sqSize, sqSize, 0, 0, sqSize, sqSize);
         
-        // Auto-detect quad corners for crop box inside 1:1 square canvas
-        const corners = detectDocumentCorners(canvas);
+        // Auto-detect quad corners depending on selected Scanner Level Mode
+        let corners: QuadCorners;
+        if (scanMode === 'question') {
+          corners = detectQuestionCorners(canvas);
+        } else if (scanMode === 'doc') {
+          corners = detectDocumentCorners(canvas);
+        } else {
+          // Normal 1:1 Photo Mode (full square crop bounds)
+          corners = {
+            topLeft: { x: 0.02 * canvas.width, y: 0.02 * canvas.height },
+            topRight: { x: 0.98 * canvas.width, y: 0.02 * canvas.height },
+            bottomRight: { x: 0.98 * canvas.width, y: 0.98 * canvas.height },
+            bottomLeft: { x: 0.02 * canvas.width, y: 0.98 * canvas.height }
+          };
+        }
+
         const w = canvas.width;
         const h = canvas.height;
         if (w > 0 && h > 0) {
@@ -348,7 +444,21 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         const tCtx = tempCanvas.getContext('2d');
         if (tCtx) {
           tCtx.drawImage(img, 0, 0);
-          const corners = detectDocumentCorners(tempCanvas, 0.05);
+
+          let corners: QuadCorners;
+          if (scanMode === 'question') {
+            corners = detectQuestionCorners(tempCanvas);
+          } else if (scanMode === 'doc') {
+            corners = detectDocumentCorners(tempCanvas, 0.05);
+          } else {
+            corners = {
+              topLeft: { x: 0.02 * img.width, y: 0.02 * img.height },
+              topRight: { x: 0.98 * img.width, y: 0.02 * img.height },
+              bottomRight: { x: 0.98 * img.width, y: 0.98 * img.height },
+              bottomLeft: { x: 0.02 * img.width, y: 0.98 * img.height }
+            };
+          }
+
           const w = img.width;
           const h = img.height;
           if (w > 0 && h > 0) {
@@ -494,34 +604,63 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         {step === 1 && (
           <div className="relative w-full h-full flex flex-col justify-between p-4 bg-black">
             
-            {/* Top Bar: Close Button & Flashlight */}
-            <div className="relative z-30 flex items-center justify-between pt-2 px-2">
+            {/* Top Bar: Close Button, Dynamic Mode Badge, Mode Toggle & Flashlight */}
+            <div className="relative z-30 flex items-center justify-between pt-2 px-2 gap-2">
               <button
                 onClick={handleClose}
-                className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/80 transition-colors border border-white/10"
+                className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/80 transition-colors border border-white/10 shrink-0"
                 title="Close Scanner"
               >
                 <X className="w-5 h-5" />
               </button>
 
-              {/* Live Adobe-Scan Detector Status Badge */}
-              <div className="px-4 py-1.5 rounded-full backdrop-blur-md shadow-lg border border-cyan-400/40 bg-[#101929]/90 text-cyan-300">
+              {/* 3-Level Scanner Mode Status Badge */}
+              <div className="px-3.5 py-1.5 rounded-full backdrop-blur-md shadow-lg border border-cyan-400/40 bg-[#101929]/90 text-cyan-300 transition-all">
                 <p className="font-bold text-xs flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                  <span>Adobe Scanner — Align Document</span>
+                  <span className={`w-2 h-2 rounded-full animate-pulse ${
+                    scanMode === 'question' ? 'bg-amber-400' : scanMode === 'doc' ? 'bg-cyan-400' : 'bg-emerald-400'
+                  }`} />
+                  <span>
+                    {scanMode === 'off' && 'Normal Camera (1:1 Photo)'}
+                    {scanMode === 'doc' && '📄 Document Mode — Auto Quad'}
+                    {scanMode === 'question' && '❓ Question Mode — Auto Crop Card'}
+                  </span>
                 </p>
               </div>
 
-              {/* Flashlight Toggle Button (ONLY Zap symbol icon, no text) */}
-              <div className="flex items-center gap-2">
+              {/* Action Buttons: 3-Level Scanner Mode Toggle + Flashlight (ONLY Symbol Icons, No Text) */}
+              <div className="flex items-center gap-2 shrink-0">
                 <button
-                  onClick={toggleFlashlight}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors border border-white/10 ${
-                    flashlightOn ? 'bg-amber-400 text-black shadow-[0_0_15px_rgba(251,191,36,0.5)]' : 'bg-black/60 backdrop-blur-md text-white hover:bg-black/80'
+                  onClick={toggleScanMode}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border border-white/10 ${
+                    scanMode === 'question'
+                      ? 'bg-amber-400 text-black shadow-[0_0_15px_rgba(251,191,36,0.6)] ring-2 ring-amber-300'
+                      : scanMode === 'doc'
+                      ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.6)] ring-2 ring-cyan-300'
+                      : 'bg-black/60 backdrop-blur-md text-white/70 hover:text-white hover:bg-black/80'
                   }`}
-                  title="Toggle Flashlight"
+                  title={
+                    scanMode === 'off'
+                      ? 'Normal Photo (Click to switch to Document Mode)'
+                      : scanMode === 'doc'
+                      ? 'Document Mode (Click to switch to Question Mode)'
+                      : 'Question Mode (Click to switch to Normal Photo)'
+                  }
                 >
                   <Zap className="w-5 h-5 fill-current" />
+                </button>
+
+                {/* Eye Flashlight Torch Toggle Button */}
+                <button
+                  onClick={toggleFlashlight}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all border border-white/10 ${
+                    flashlightOn
+                      ? 'bg-amber-400 text-black shadow-[0_0_15px_rgba(251,191,36,0.6)]'
+                      : 'bg-black/60 backdrop-blur-md text-white/80 hover:text-white hover:bg-black/80'
+                  }`}
+                  title="Toggle Flashlight Torch"
+                >
+                  <Eye className="w-5 h-5" />
                 </button>
               </div>
             </div>
@@ -538,6 +677,33 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   muted
                   className="absolute inset-0 w-full h-full object-cover"
                 />
+
+                {/* Live 4 Blue Corner Dots Identification System Overlay (Matching User Screenshot) */}
+                {scanMode !== 'off' && detectedQuad.isDetected && (
+                  <>
+                    {/* Quad Polygon Highlight */}
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-40">
+                      <polygon
+                        points={`${detectedQuad.topLeft.x * 100}%,${detectedQuad.topLeft.y * 100}% ${detectedQuad.topRight.x * 100}%,${detectedQuad.topRight.y * 100}% ${detectedQuad.bottomRight.x * 100}%,${detectedQuad.bottomRight.y * 100}% ${detectedQuad.bottomLeft.x * 100}%,${detectedQuad.bottomLeft.y * 100}%`}
+                        fill={scanMode === 'question' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(37, 99, 235, 0.18)'}
+                        stroke={scanMode === 'question' ? '#fbbf24' : '#2563eb'}
+                        strokeWidth="2.5"
+                      />
+                    </svg>
+
+                    {/* 4 Blue Circular Corner Identification Dots */}
+                    <div className="absolute w-7 h-7 rounded-full bg-[#2563eb] border-2 border-white shadow-[0_0_12px_rgba(37,99,235,0.9)] -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 transition-all duration-150" style={{ left: `${detectedQuad.topLeft.x * 100}%`, top: `${detectedQuad.topLeft.y * 100}%` }} />
+                    <div className="absolute w-7 h-7 rounded-full bg-[#2563eb] border-2 border-white shadow-[0_0_12px_rgba(37,99,235,0.9)] -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 transition-all duration-150" style={{ left: `${detectedQuad.topRight.x * 100}%`, top: `${detectedQuad.topRight.y * 100}%` }} />
+                    <div className="absolute w-7 h-7 rounded-full bg-[#2563eb] border-2 border-white shadow-[0_0_12px_rgba(37,99,235,0.9)] -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 transition-all duration-150" style={{ left: `${detectedQuad.bottomRight.x * 100}%`, top: `${detectedQuad.bottomRight.y * 100}%` }} />
+                    <div className="absolute w-7 h-7 rounded-full bg-[#2563eb] border-2 border-white shadow-[0_0_12px_rgba(37,99,235,0.9)] -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 transition-all duration-150" style={{ left: `${detectedQuad.bottomLeft.x * 100}%`, top: `${detectedQuad.bottomLeft.y * 100}%` }} />
+
+                    {/* Floating Center Badge */}
+                    <div className="absolute z-50 bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/20 text-white font-semibold text-xs shadow-2xl flex items-center gap-2 pointer-events-none animate-pulse">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                      <span>{scanMode === 'question' ? 'Question detected... hold steady' : 'Capturing... hold steady'}</span>
+                    </div>
+                  </>
+                )}
 
                 {/* Shutter Camera Flash Animation Overlay */}
                 {isScanningFlash && (
@@ -570,6 +736,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             {/* Bottom Shutter Capture + Upload Button */}
             <div className="relative z-30 flex flex-col items-center gap-4 pb-4">
               <button
+                id="capture-shutter-btn"
                 onClick={captureFrameToCrop}
                 disabled={isScanningFlash}
                 className="w-16 h-16 rounded-full bg-white p-1 shadow-2xl flex items-center justify-center active:scale-90 transition-transform ring-4 ring-cyan-500/30"

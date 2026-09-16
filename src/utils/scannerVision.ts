@@ -87,8 +87,7 @@ export function detectDocumentCorners(
     const imgData = ctx.getImageData(0, 0, width, height);
     const data = imgData.data;
 
-    // Convert to grayscale matrix
-    const sampleScale = Math.max(1, Math.floor(Math.max(width, height) / 200));
+    const sampleScale = Math.max(1, Math.floor(Math.max(width, height) / 180));
     const sw = Math.floor(width / sampleScale);
     const sh = Math.floor(height / sampleScale);
     const gray = new Float32Array(sw * sh);
@@ -102,13 +101,17 @@ export function detectDocumentCorners(
       }
     }
 
-    // Exclude extreme outer border (outer 4% pixels) to ignore camera UI borders
-    const borderMarginX = Math.floor(sw * 0.04);
-    const borderMarginY = Math.floor(sh * 0.04);
+    // Exclude outer 3% border margin to ignore camera viewfinder frame edges
+    const borderMarginX = Math.floor(sw * 0.03);
+    const borderMarginY = Math.floor(sh * 0.03);
 
-    let minX = sw - borderMarginX, minY = sh - borderMarginY;
-    let maxX = borderMarginX, maxY = borderMarginY;
-    let edgeCount = 0;
+    const edgePoints: Point[] = [];
+    let minSum = Infinity, maxSum = -Infinity;
+    let minDiff = Infinity, maxDiff = -Infinity;
+    let ptTL: Point = { x: borderMarginX, y: borderMarginY };
+    let ptTR: Point = { x: sw - borderMarginX, y: borderMarginY };
+    let ptBR: Point = { x: sw - borderMarginX, y: sh - borderMarginY };
+    let ptBL: Point = { x: borderMarginX, y: sh - borderMarginY };
 
     for (let y = borderMarginY; y < sh - borderMarginY; y++) {
       for (let x = borderMarginX; x < sw - borderMarginX; x++) {
@@ -116,40 +119,34 @@ export function detectDocumentCorners(
         const gy = gray[(y + 1) * sw + x] - gray[(y - 1) * sw + x];
         const grad = Math.abs(gx) + Math.abs(gy);
 
-        // High gradient threshold for real paper/book contrast edges
-        if (grad > 38) {
-          minX = Math.min(minX, x);
-          minY = Math.min(minY, y);
-          maxX = Math.max(maxX, x);
-          maxY = Math.max(maxY, y);
-          edgeCount++;
+        if (grad > 36) {
+          edgePoints.push({ x, y });
+
+          const sum = x + y;
+          const diff = x - y;
+
+          if (sum < minSum) { minSum = sum; ptTL = { x, y }; }
+          if (sum > maxSum) { maxSum = sum; ptBR = { x, y }; }
+          if (diff > maxDiff) { maxDiff = diff; ptTR = { x, y }; }
+          if (diff < minDiff) { minDiff = diff; ptBL = { x, y }; }
         }
       }
     }
 
-    const boxW = (maxX - minX) * sampleScale;
-    const boxH = (maxY - minY) * sampleScale;
+    if (edgePoints.length > 25) {
+      const boxW = Math.abs(ptTR.x - ptTL.x) * sampleScale;
+      const boxH = Math.abs(ptBL.y - ptTL.y) * sampleScale;
+      const frameArea = width * height;
+      const areaPct = (boxW * boxH) / frameArea;
 
-    // Rule: Document must occupy between 15% and 82% of screen area (rejecting >85% outer frame selections)
-    const frameArea = width * height;
-    const boxArea = boxW * boxH;
-    const areaPct = boxArea / frameArea;
-
-    if (edgeCount > 30 && areaPct >= 0.14 && areaPct <= 0.85 && boxW > width * 0.22 && boxH > height * 0.22) {
-      const marginX = Math.round(boxW * 0.01);
-      const marginY = Math.round(boxH * 0.01);
-
-      const tlX = Math.max(0, Math.round(minX * sampleScale) - marginX);
-      const tlY = Math.max(0, Math.round(minY * sampleScale) - marginY);
-      const brX = Math.min(width, Math.round(maxX * sampleScale) + marginX);
-      const brY = Math.min(height, Math.round(maxY * sampleScale) + marginY);
-
-      return sortQuadCorners([
-        { x: tlX, y: tlY },
-        { x: brX, y: tlY },
-        { x: brX, y: brY },
-        { x: tlX, y: brY }
-      ]);
+      if (areaPct >= 0.10 && areaPct <= 0.88) {
+        return sortQuadCorners([
+          { x: ptTL.x * sampleScale, y: ptTL.y * sampleScale },
+          { x: ptTR.x * sampleScale, y: ptTR.y * sampleScale },
+          { x: ptBR.x * sampleScale, y: ptBR.y * sampleScale },
+          { x: ptBL.x * sampleScale, y: ptBL.y * sampleScale }
+        ]);
+      }
     }
   } catch (err) {
     console.warn('Corner detection algorithm fallback used:', err);
@@ -420,6 +417,189 @@ export function parseMCQFromText(text: string): { questionText: string; options:
     questionText: questionText || text || 'Question text extracted from document scan.',
     options
   };
+}
+
+/**
+ * Detect Question Card / Block boundaries specifically for Question Scanner Mode (Question AI / Photomath / Doubtnut mode).
+ * Focuses on central text line density, question statement cards, and MCQ option blocks (A, B, C, D).
+ */
+export function detectQuestionCorners(
+  canvas: HTMLCanvasElement
+): QuadCorners {
+  const width = canvas.width;
+  const height = canvas.height;
+
+  // Default question box preset (central tight card region)
+  const defaultQuestionQuad: QuadCorners = {
+    topLeft: { x: Math.round(width * 0.08), y: Math.round(height * 0.18) },
+    topRight: { x: Math.round(width * 0.92), y: Math.round(height * 0.18) },
+    bottomRight: { x: Math.round(width * 0.92), y: Math.round(height * 0.68) },
+    bottomLeft: { x: Math.round(width * 0.08), y: Math.round(height * 0.68) }
+  };
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx || width < 20 || height < 20) return defaultQuestionQuad;
+
+  try {
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const data = imgData.data;
+
+    const sampleScale = Math.max(1, Math.floor(Math.max(width, height) / 180));
+    const sw = Math.floor(width / sampleScale);
+    const sh = Math.floor(height / sampleScale);
+    const gray = new Float32Array(sw * sh);
+
+    for (let sy = 0; sy < sh; sy++) {
+      for (let sx = 0; sx < sw; sx++) {
+        const origX = Math.min(width - 1, sx * sampleScale);
+        const origY = Math.min(height - 1, sy * sampleScale);
+        const idx = (origY * width + origX) * 4;
+        gray[sy * sw + sx] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+      }
+    }
+
+    // Horizontal text line projection & edge density scoring for question blocks
+    let minX = sw, minY = sh, maxX = 0, maxY = 0;
+    let textEdgeCount = 0;
+
+    for (let y = Math.floor(sh * 0.12); y < Math.floor(sh * 0.88); y++) {
+      for (let x = Math.floor(sw * 0.05); x < Math.floor(sw * 0.95); x++) {
+        const gx = Math.abs(gray[y * sw + (x + 1)] - gray[y * sw + (x - 1)]);
+        const gy = Math.abs(gray[(y + 1) * sw + x] - gray[(y - 1) * sw + x]);
+        const grad = gx + gy;
+
+        // High gradient threshold for printed ink letters & equations
+        if (grad > 40) {
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+          textEdgeCount++;
+        }
+      }
+    }
+
+    const boxW = (maxX - minX) * sampleScale;
+    const boxH = (maxY - minY) * sampleScale;
+
+    if (textEdgeCount > 15 && boxW > width * 0.25 && boxH > height * 0.15) {
+      const marginX = Math.round(boxW * 0.02);
+      const marginY = Math.round(boxH * 0.02);
+
+      const tlX = Math.max(0, Math.round(minX * sampleScale) - marginX);
+      const tlY = Math.max(0, Math.round(minY * sampleScale) - marginY);
+      const brX = Math.min(width, Math.round(maxX * sampleScale) + marginX);
+      const brY = Math.min(height, Math.round(maxY * sampleScale) + marginY);
+
+      return sortQuadCorners([
+        { x: tlX, y: tlY },
+        { x: brX, y: tlY },
+        { x: brX, y: brY },
+        { x: tlX, y: brY }
+      ]);
+    }
+  } catch (err) {
+    console.warn('Question corner detection fallback:', err);
+  }
+
+  return defaultQuestionQuad;
+}
+
+/**
+ * Verify whether detected quad corners represent a genuine paper document, book page, or question paper
+ * (rejects people, faces, clothes, walls, and non-document camera scenes).
+ */
+export function verifyIsRealDocument(
+  canvas: HTMLCanvasElement,
+  corners: QuadCorners
+): { isValidDoc: boolean; confidence: number } {
+  const ctx = canvas.getContext('2d');
+  if (!ctx || canvas.width < 20 || canvas.height < 20) {
+    return { isValidDoc: false, confidence: 0 };
+  }
+
+  try {
+    const w = canvas.width;
+    const h = canvas.height;
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    // Check 1: Calculate quadrilateral side lengths
+    const topW = Math.hypot(corners.topRight.x - corners.topLeft.x, corners.topRight.y - corners.topLeft.y);
+    const botW = Math.hypot(corners.bottomRight.x - corners.bottomLeft.x, corners.bottomRight.y - corners.bottomLeft.y);
+    const leftH = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y);
+    const rightH = Math.hypot(corners.bottomRight.x - corners.topRight.x, corners.bottomRight.y - corners.topRight.y);
+
+    const avgW = (topW + botW) / 2;
+    const avgH = (leftH + rightH) / 2;
+    const area = avgW * avgH;
+    const areaPct = area / (w * h);
+
+    // Reject if area is too small (<12%) or covers almost entire frame (>85%)
+    if (areaPct < 0.12 || areaPct > 0.85) {
+      return { isValidDoc: false, confidence: 0 };
+    }
+
+    // Aspect ratio check: paper/book aspect ratio must be between 0.45 and 2.1
+    const aspectRatio = avgW / (avgH || 1);
+    if (aspectRatio < 0.45 || aspectRatio > 2.1) {
+      return { isValidDoc: false, confidence: 0 };
+    }
+
+    // Opposing sides parallelism: top vs bottom ratio, left vs right ratio
+    const widthRatio = Math.min(topW, botW) / (Math.max(topW, botW) || 1);
+    const heightRatio = Math.min(leftH, rightH) / (Math.max(leftH, rightH) || 1);
+
+    if (widthRatio < 0.55 || heightRatio < 0.55) {
+      return { isValidDoc: false, confidence: 0 }; // Asymmetric random points (not paper)
+    }
+
+    // Check 2: Paper Luminance & Contrast inside detected quad center
+    const centerX = Math.round((corners.topLeft.x + corners.topRight.x + corners.bottomRight.x + corners.bottomLeft.x) / 4);
+    const centerY = Math.round((corners.topLeft.y + corners.topRight.y + corners.bottomRight.y + corners.bottomLeft.y) / 4);
+
+    let paperPixelCount = 0;
+    let highGradientEdgeCount = 0;
+    const sampleRadius = Math.round(Math.min(avgW, avgH) * 0.25);
+
+    // Sample pixels in central document region
+    for (let dy = -sampleRadius; dy <= sampleRadius; dy += 4) {
+      for (let dx = -sampleRadius; dx <= sampleRadius; dx += 4) {
+        const px = Math.max(0, Math.min(w - 1, centerX + dx));
+        const py = Math.max(0, Math.min(h - 1, centerY + dy));
+        const idx = (py * w + px) * 4;
+
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+        // Paper pages are generally light/white background (luminance > 110)
+        if (lum > 105) paperPixelCount++;
+
+        // Sample text gradient
+        if (px < w - 4 && py < h - 4) {
+          const rightIdx = (py * w + (px + 4)) * 4;
+          const rLum = 0.299 * data[rightIdx] + 0.587 * data[rightIdx + 1] + 0.114 * data[rightIdx + 2];
+          if (Math.abs(lum - rLum) > 26) {
+            highGradientEdgeCount++;
+          }
+        }
+      }
+    }
+
+    const totalSamples = Math.pow(Math.floor((sampleRadius * 2) / 4) + 1, 2) || 1;
+    const paperPct = paperPixelCount / totalSamples;
+
+    // A real document must have bright paper background (>30% light pixels) AND printed text/edge gradients (>4 text edges)
+    if (paperPct >= 0.30 && highGradientEdgeCount >= 4) {
+      return { isValidDoc: true, confidence: Math.min(0.98, paperPct + 0.3) };
+    }
+  } catch (err) {
+    console.warn('Document verification error:', err);
+  }
+
+  return { isValidDoc: false, confidence: 0 };
 }
 
 /**
