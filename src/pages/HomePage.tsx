@@ -13,7 +13,10 @@ import {
   Bot,
   Layers,
   Search,
-  Book
+  Book,
+  Wrench,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { HomeHero } from '../components/HomeHero';
@@ -21,6 +24,7 @@ import { DailyStatusBar } from '../components/DailyStatusBar';
 import { AppleTreeWidget } from '../components/AppleTreeWidget';
 import { FocusClockCard } from '../components/FocusClockCard';
 import { MusicPlayerWidget } from '../components/MusicPlayerWidget';
+import { SamsungHealthWidget } from '../components/SamsungHealthWidget';
 import streak3d from '../assets/streak_3d.png';
 
 export const HomePage: React.FC = () => {
@@ -47,9 +51,12 @@ export const HomePage: React.FC = () => {
   }, []);
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300 pb-16">
+    <div className="space-y-6 animate-in fade-in duration-300 pb-16">
       {/* Hero Welcome & Command Center Banner */}
       <HomeHero />
+
+      {/* NEW Samsung Health Interactive Widget Hub (Inside Home Page) */}
+      <SamsungHealthWidget />
 
       {/* 2-Column Main Dashboard Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -201,6 +208,31 @@ export const HomePage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Mistake Tracker Card */}
+              <div
+                onClick={() => setCurrentRoute('mistake-tracker')}
+                className="p-5 bg-gradient-to-br from-[var(--bg-surface-solid)] to-[var(--bg-surface-secondary)] border border-[var(--border-color)] rounded-3xl hover:border-[var(--color-cyan)]/50 transition-all cursor-pointer group shadow-xl relative overflow-hidden hover-shine-effect"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    Weak Topics Log
+                  </span>
+                </div>
+                <h3 className="text-base font-extrabold text-white group-hover:text-[var(--color-cyan)] transition-colors mb-1 font-heading">
+                  Mistake Tracker & Log
+                </h3>
+                <p className="text-xs text-[var(--text-secondary)] leading-relaxed mb-4">
+                  Track flagged questions, review incorrect test answers, and target weak chapter concepts.
+                </p>
+                <div className="flex items-center text-xs font-bold text-[var(--color-cyan)] group-hover:underline">
+                  <span>Open Error Book</span>
+                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                </div>
+              </div>
+
               {/* Documents Card */}
               <div
                 onClick={() => setCurrentRoute('documents')}
@@ -222,6 +254,31 @@ export const HomePage: React.FC = () => {
                 </p>
                 <div className="flex items-center text-xs font-bold text-[var(--color-cyan)] group-hover:underline">
                   <span>Browse Documents</span>
+                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                </div>
+              </div>
+
+              {/* Interactive Tools Card */}
+              <div
+                onClick={() => setCurrentRoute('tools')}
+                className="p-5 bg-gradient-to-br from-[var(--bg-surface-solid)] to-[var(--bg-surface-secondary)] border border-[var(--border-color)] rounded-3xl hover:border-[var(--color-cyan)]/50 transition-all cursor-pointer group shadow-xl relative overflow-hidden hover-shine-effect"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-400">
+                    <Wrench className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Physics Calculators
+                  </span>
+                </div>
+                <h3 className="text-base font-extrabold text-white group-hover:text-[var(--color-cyan)] transition-colors mb-1 font-heading">
+                  Interactive Tools & Utilities
+                </h3>
+                <p className="text-xs text-[var(--text-secondary)] leading-relaxed mb-4">
+                  Access physics unit converters, scientific calculators, periodic table, and study planners.
+                </p>
+                <div className="flex items-center text-xs font-bold text-[var(--color-cyan)] group-hover:underline">
+                  <span>Open Utilities Toolbox</span>
                   <ArrowRight className="w-3.5 h-3.5 ml-1" />
                 </div>
               </div>

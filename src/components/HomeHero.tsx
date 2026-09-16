@@ -33,13 +33,6 @@ export const HomeHero: React.FC = () => {
         <div className="lg:col-span-8">
         {/* Eyebrow badge */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <div className="inline-flex items-center space-x-2 px-3 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded-full">
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-            <span className="text-[11px] font-extrabold tracking-wider text-cyan-300 uppercase">
-              NEXT-GEN EDTECH PLATFORM V4.0
-            </span>
-          </div>
-
           <div className="inline-flex items-center space-x-1.5 px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300 text-[11px] font-bold">
             <Award className="w-3.5 h-3.5 text-purple-400" />
             <span>Academic Level: {normalizedGrade}</span>

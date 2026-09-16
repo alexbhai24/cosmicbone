@@ -32,14 +32,6 @@ export const DailyStatusBar: React.FC<DailyStatusBarProps> = () => {
     textColor: string;
   }[] = [
     {
-      key: 'nta_q',
-      label: 'NTA_Q',
-      icon: <span className="text-2xl sm:text-3xl select-none filter drop-shadow">{getSymbolForDay(['💉', '🩺', '🩹'])}</span>,
-      ringColor: 'from-amber-500 via-yellow-400 to-orange-500',
-      bgColor: 'bg-amber-500/10 border-amber-500/30',
-      textColor: 'text-amber-400'
-    },
-    {
       key: 'physics',
       label: 'Physics',
       icon: <span className="text-2xl sm:text-3xl select-none filter drop-shadow">{getSymbolForDay(['🧲', '🔭'])}</span>,
@@ -70,6 +62,14 @@ export const DailyStatusBar: React.FC<DailyStatusBarProps> = () => {
       ringColor: 'from-purple-400 via-violet-400 to-indigo-500',
       bgColor: 'bg-purple-500/10 border-purple-500/30',
       textColor: 'text-purple-400'
+    },
+    {
+      key: 'nta_q',
+      label: 'NTA_Q',
+      icon: <span className="text-2xl sm:text-3xl select-none filter drop-shadow">{getSymbolForDay(['💉', '🩺', '🩹'])}</span>,
+      ringColor: 'from-amber-500 via-yellow-400 to-orange-500',
+      bgColor: 'bg-amber-500/10 border-amber-500/30',
+      textColor: 'text-amber-400'
     }
   ];
 
