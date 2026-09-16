@@ -148,57 +148,6 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     };
   }, []);
 
-  // Throttled camera document auto-detection loop (ONLY runs when Step 1 and Auto Scan is ON)
-  useEffect(() => {
-    if (step !== 1 || !autoScanEnabled) {
-      setDetectedBox(prev => ({ ...prev, isDetected: false }));
-      return;
-    }
-
-    const intervalId = setInterval(() => {
-      if (videoRef.current && videoRef.current.readyState === 4) {
-        const video = videoRef.current;
-        const vw = video.videoWidth || 1280;
-        const vh = video.videoHeight || 720;
-        const sqSize = Math.min(vw, vh);
-        const cropX = Math.round((vw - sqSize) / 2);
-        const cropY = Math.round((vh - sqSize) / 2);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = 192;
-        canvas.height = 192;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(video, cropX, cropY, sqSize, sqSize, 0, 0, 192, 192);
-          const corners = detectDocumentCorners(canvas, 0.05);
-          const textPresent = isDocumentOrTextPresent(canvas);
-
-          const w = (corners.bottomRight.x - corners.topLeft.x) / 192;
-          const h = (corners.bottomRight.y - corners.topLeft.y) / 192;
-          const x = corners.topLeft.x / 192;
-          const y = corners.topLeft.y / 192;
-
-          if (textPresent && w > 0.25 && h > 0.25) {
-            setDetectedBox({
-              isDetected: true,
-              x: Math.max(0.02, x),
-              y: Math.max(0.02, y),
-              w: Math.min(0.96, w),
-              h: Math.min(0.96, h),
-              confidence: 0.94
-            });
-          } else {
-            setDetectedBox(prev => ({ ...prev, isDetected: false }));
-          }
-        }
-      }
-    }, 600);
-
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [step, autoScanEnabled]);
-
   // Syllabus mapping selection
   const currentSyllabus = selectedExam === 'neet' ? syllabusNEET : syllabusJEE;
   const validSubjects = useMemo(() => (currentSyllabus?.subjects || []).filter(Boolean), [currentSyllabus]);
@@ -555,38 +504,29 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <X className="w-5 h-5" />
               </button>
 
-              {/* Live Adobe-Scan Auto-Detector Status Badge */}
-              <div className={`px-3 py-1.5 rounded-full backdrop-blur-md shadow-lg border transition-all ${
-                autoScanEnabled && detectedBox.isDetected
-                  ? 'bg-emerald-950/80 border-emerald-400/60 text-emerald-300'
-                  : 'bg-[#101929]/90 border-cyan-400/40 text-cyan-300'
-              }`}>
+              {/* Live Adobe-Scan Detector Status Badge */}
+              <div className="px-4 py-1.5 rounded-full backdrop-blur-md shadow-lg border border-cyan-400/40 bg-[#101929]/90 text-cyan-300">
                 <p className="font-bold text-xs flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${autoScanEnabled && detectedBox.isDetected ? 'bg-emerald-400 animate-ping' : 'bg-cyan-400/50'}`} />
-                  {autoScanEnabled
-                    ? (detectedBox.isDetected ? '✓ Document / Text Quad Auto-Detected' : 'Auto Scanning Active...')
-                    : 'Tap Shutter or turn Auto ON'}
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                  <span>Adobe Scanner — Align Document</span>
                 </p>
               </div>
 
-              {/* Auto Scan Toggle Button (Screenshot 4) */}
+              {/* Flashlight Toggle Button (ONLY Zap symbol icon, no text) */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setAutoScanEnabled(prev => !prev)}
-                  className={`px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-all border shadow-lg ${
-                    autoScanEnabled 
-                      ? 'bg-amber-400 border-amber-300 text-black font-extrabold scale-105' 
-                      : 'bg-black/60 backdrop-blur-md border-white/20 text-white/70 hover:text-white'
+                  onClick={toggleFlashlight}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors border border-white/10 ${
+                    flashlightOn ? 'bg-amber-400 text-black shadow-[0_0_15px_rgba(251,191,36,0.5)]' : 'bg-black/60 backdrop-blur-md text-white hover:bg-black/80'
                   }`}
-                  title="Toggle Auto Scan Mode"
+                  title="Toggle Flashlight"
                 >
-                  <Zap className={`w-4 h-4 ${autoScanEnabled ? 'fill-current text-black animate-pulse' : 'text-white/60'}`} />
-                  <span className="text-[11px] uppercase tracking-wide font-bold">{autoScanEnabled ? 'Auto ON' : 'Auto OFF'}</span>
+                  <Zap className="w-5 h-5 fill-current" />
                 </button>
               </div>
             </div>
 
-            {/* 1:1 Aspect Ratio Square Viewfinder Frame with Real-Time Adobe Scan Mesh */}
+            {/* 1:1 Aspect Ratio Square Viewfinder Frame */}
             <div className="relative flex-1 my-3 flex items-center justify-center overflow-hidden">
               <div className="relative w-full max-w-sm sm:max-w-md aspect-square rounded-3xl overflow-hidden bg-black flex items-center justify-center border-2 border-cyan-400/50 shadow-[0_0_50px_rgba(0,240,255,0.25)]">
                 
@@ -598,30 +538,6 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   muted
                   className="absolute inset-0 w-full h-full object-cover"
                 />
-
-                {/* Real-time Adobe Scan Dynamic Bounding Quad Polygon Mesh Overlay (ONLY rendered when Auto-Scan ON & Document Detected) */}
-                {autoScanEnabled && detectedBox.isDetected && (
-                  <svg className="absolute inset-0 w-full h-full pointer-events-none z-20 animate-in fade-in duration-200" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <polygon
-                      points={`
-                        ${detectedBox.x * 100},${detectedBox.y * 100} 
-                        ${(detectedBox.x + detectedBox.w) * 100},${detectedBox.y * 100} 
-                        ${(detectedBox.x + detectedBox.w) * 100},${(detectedBox.y + detectedBox.h) * 100} 
-                        ${detectedBox.x * 100},${(detectedBox.y + detectedBox.h) * 100}
-                      `}
-                      fill="rgba(0, 240, 255, 0.16)"
-                      stroke="#00f0ff"
-                      strokeWidth="2"
-                      vectorEffect="non-scaling-stroke"
-                      className="transition-all duration-200"
-                    />
-                    {/* 4 Corner Adobe Scan Anchor Points */}
-                    <circle cx={`${detectedBox.x * 100}`} cy={`${detectedBox.y * 100}`} r="3" fill="#00f0ff" stroke="#ffffff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                    <circle cx={`${(detectedBox.x + detectedBox.w) * 100}`} cy={`${detectedBox.y * 100}`} r="3" fill="#00f0ff" stroke="#ffffff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                    <circle cx={`${(detectedBox.x + detectedBox.w) * 100}`} cy={`${(detectedBox.y + detectedBox.h) * 100}`} r="3" fill="#00f0ff" stroke="#ffffff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                    <circle cx={`${detectedBox.x * 100}`} cy={`${(detectedBox.y + detectedBox.h) * 100}`} r="3" fill="#00f0ff" stroke="#ffffff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                  </svg>
-                )}
 
                 {/* Shutter Camera Flash Animation Overlay */}
                 {isScanningFlash && (
