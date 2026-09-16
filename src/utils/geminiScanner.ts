@@ -79,7 +79,8 @@ Respond ONLY with a raw JSON object (no markdown formatting, no \`\`\`json) in t
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey
           },
           body: JSON.stringify(requestBody)
         });
