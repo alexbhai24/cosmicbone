@@ -688,12 +688,13 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 {scanMode !== 'off' && detectedQuad.isDetected && (
                   <>
                     {/* Quad Polygon Highlight */}
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-40">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none z-40">
                       <polygon
-                        points={`${detectedQuad.topLeft.x * 100}%,${detectedQuad.topLeft.y * 100}% ${detectedQuad.topRight.x * 100}%,${detectedQuad.topRight.y * 100}% ${detectedQuad.bottomRight.x * 100}%,${detectedQuad.bottomRight.y * 100}% ${detectedQuad.bottomLeft.x * 100}%,${detectedQuad.bottomLeft.y * 100}%`}
+                        points={`${detectedQuad.topLeft.x * 100},${detectedQuad.topLeft.y * 100} ${detectedQuad.topRight.x * 100},${detectedQuad.topRight.y * 100} ${detectedQuad.bottomRight.x * 100},${detectedQuad.bottomRight.y * 100} ${detectedQuad.bottomLeft.x * 100},${detectedQuad.bottomLeft.y * 100}`}
                         fill={scanMode === 'question' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(37, 99, 235, 0.18)'}
                         stroke={scanMode === 'question' ? '#fbbf24' : '#2563eb'}
-                        strokeWidth="2.5"
+                        strokeWidth="1.5"
+                        vectorEffect="non-scaling-stroke"
                       />
                     </svg>
 
