@@ -35,8 +35,35 @@ export interface DetectedBlock {
 }
 
 /**
+ * Sort 4 arbitrary 2D corner points canonically into:
+ * Top-Left (min sum x+y), Top-Right (min diff x-y),
+ * Bottom-Right (max sum x+y), Bottom-Left (max diff x-y)
+ */
+export function sortQuadCorners(points: Point[]): QuadCorners {
+  if (points.length < 4) {
+    return {
+      topLeft: { x: 0.05, y: 0.05 },
+      topRight: { x: 0.95, y: 0.05 },
+      bottomRight: { x: 0.95, y: 0.95 },
+      bottomLeft: { x: 0.05, y: 0.95 }
+    };
+  }
+
+  // Calculate sums (x + y) and differences (x - y)
+  const sortedBySum = [...points].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+  const sortedByDiff = [...points].sort((a, b) => (a.x - a.y) - (b.x - b.y));
+
+  const topLeft = sortedBySum[0];
+  const bottomRight = sortedBySum[sortedBySum.length - 1];
+  const topRight = sortedByDiff[sortedByDiff.length - 1];
+  const bottomLeft = sortedByDiff[0];
+
+  return { topLeft, topRight, bottomRight, bottomLeft };
+}
+
+/**
  * Detect document boundaries / quad corners from HTMLCanvasElement image data
- * Uses Sobel-like luminance gradient edge scoring, contour boundary search,
+ * Uses Sobel luminance gradient edge scoring, contour boundary search,
  * and geometric convex quad candidate evaluation.
  */
 export function detectDocumentCorners(
@@ -61,15 +88,15 @@ export function detectDocumentCorners(
     const data = imgData.data;
 
     // Convert to grayscale matrix & compute edge intensity gradient
-    const sampleScale = Math.max(1, Math.floor(Math.max(width, height) / 200));
+    const sampleScale = Math.max(1, Math.floor(Math.max(width, height) / 240));
     const sw = Math.floor(width / sampleScale);
     const sh = Math.floor(height / sampleScale);
     const gray = new Float32Array(sw * sh);
 
     for (let sy = 0; sy < sh; sy++) {
       for (let sx = 0; sx < sw; sx++) {
-        const origX = sx * sampleScale;
-        const origY = sy * sampleScale;
+        const origX = Math.min(width - 1, sx * sampleScale);
+        const origY = Math.min(height - 1, sy * sampleScale);
         const idx = (origY * width + origX) * 4;
         const r = data[idx];
         const g = data[idx + 1];
@@ -78,7 +105,7 @@ export function detectDocumentCorners(
       }
     }
 
-    // Find bounding box of high-gradient edge points (Sobel magnitude)
+    // Sobel edge gradient thresholding
     let minX = sw, minY = sh, maxX = 0, maxY = 0;
     let edgeCount = 0;
 
@@ -88,7 +115,7 @@ export function detectDocumentCorners(
         const gy = gray[(y + 1) * sw + x] - gray[(y - 1) * sw + x];
         const grad = Math.abs(gx) + Math.abs(gy);
 
-        if (grad > 35) {
+        if (grad > 32) {
           minX = Math.min(minX, x);
           minY = Math.min(minY, y);
           maxX = Math.max(maxX, x);
@@ -102,21 +129,21 @@ export function detectDocumentCorners(
     const boxH = (maxY - minY) * sampleScale;
 
     // Ensure valid document bounding box (> 15% frame area)
-    if (edgeCount > 30 && boxW > width * 0.2 && boxH > height * 0.2) {
-      const marginX = Math.round(boxW * 0.02);
-      const marginY = Math.round(boxH * 0.02);
+    if (edgeCount > 25 && boxW > width * 0.18 && boxH > height * 0.18) {
+      const marginX = Math.round(boxW * 0.015);
+      const marginY = Math.round(boxH * 0.015);
 
       const tlX = Math.max(0, Math.round(minX * sampleScale) - marginX);
       const tlY = Math.max(0, Math.round(minY * sampleScale) - marginY);
       const brX = Math.min(width, Math.round(maxX * sampleScale) + marginX);
       const brY = Math.min(height, Math.round(maxY * sampleScale) + marginY);
 
-      return {
-        topLeft: { x: tlX, y: tlY },
-        topRight: { x: brX, y: tlY },
-        bottomRight: { x: brX, y: brY },
-        bottomLeft: { x: tlX, y: brY }
-      };
+      return sortQuadCorners([
+        { x: tlX, y: tlY },
+        { x: brX, y: tlY },
+        { x: brX, y: brY },
+        { x: tlX, y: brY }
+      ]);
     }
   } catch (err) {
     console.warn('Corner detection algorithm fallback used:', err);
@@ -407,8 +434,9 @@ export function isDocumentOrTextPresent(canvas: HTMLCanvasElement): boolean {
         edgeCount++;
       }
     }
-    return edgeCount > 12;
+    return edgeCount > 10;
   } catch {
     return true;
   }
 }
+

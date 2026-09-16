@@ -153,29 +153,37 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
     let animFrameId: number;
     const canvas = document.createElement('canvas');
-    canvas.width = 320;
-    canvas.height = 240;
+    canvas.width = 256;
+    canvas.height = 256;
     const ctx = canvas.getContext('2d');
 
     const sampleFrame = () => {
       if (videoRef.current && videoRef.current.readyState === 4 && ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, 320, 240);
+        const video = videoRef.current;
+        const vw = video.videoWidth || 1280;
+        const vh = video.videoHeight || 720;
+        const sqSize = Math.min(vw, vh);
+        const cropX = Math.round((vw - sqSize) / 2);
+        const cropY = Math.round((vh - sqSize) / 2);
+
+        // Sample central 1:1 square from live video feed
+        ctx.drawImage(video, cropX, cropY, sqSize, sqSize, 0, 0, 256, 256);
         const corners = detectDocumentCorners(canvas, 0.05);
         const textPresent = isDocumentOrTextPresent(canvas);
 
-        const w = (corners.bottomRight.x - corners.topLeft.x) / 320;
-        const h = (corners.bottomRight.y - corners.topLeft.y) / 240;
-        const x = corners.topLeft.x / 320;
-        const y = corners.topLeft.y / 240;
+        const w = (corners.bottomRight.x - corners.topLeft.x) / 256;
+        const h = (corners.bottomRight.y - corners.topLeft.y) / 256;
+        const x = corners.topLeft.x / 256;
+        const y = corners.topLeft.y / 256;
 
-        if (textPresent && w > 0.25 && h > 0.25) {
+        if (textPresent && w > 0.22 && h > 0.22) {
           setDetectedBox({
             isDetected: true,
             x: Math.max(0.02, x),
             y: Math.max(0.02, y),
             w: Math.min(0.96, w),
             h: Math.min(0.96, h),
-            confidence: 0.92
+            confidence: 0.94
           });
         } else {
           setDetectedBox(prev => ({ ...prev, isDetected: false }));
@@ -186,7 +194,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
     const timer = setTimeout(() => {
       sampleFrame();
-    }, 400);
+    }, 350);
 
     return () => {
       clearTimeout(timer);
@@ -278,6 +286,47 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         }
       }
     }
+  };
+
+  // Helper to rotate rawImage data URL by 90 degrees clockwise or counter-clockwise
+  const rotateRawImageCanvas = (clockwise: boolean) => {
+    if (!rawImage) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.height;
+      canvas.height = img.width;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((clockwise ? 90 : -90) * Math.PI / 180);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+
+      const newDataUrl = canvas.toDataURL('image/jpeg', 0.94);
+      setRawImage(newDataUrl);
+
+      // Rotate quad corner coordinates
+      setQuadCorners(prev => {
+        if (clockwise) {
+          return {
+            topLeft: { x: 1 - prev.bottomLeft.y, y: prev.bottomLeft.x },
+            topRight: { x: 1 - prev.topLeft.y, y: prev.topLeft.x },
+            bottomRight: { x: 1 - prev.topRight.y, y: prev.topRight.x },
+            bottomLeft: { x: 1 - prev.bottomRight.y, y: prev.bottomRight.x }
+          };
+        } else {
+          return {
+            topLeft: { x: prev.topRight.y, y: 1 - prev.topRight.x },
+            topRight: { x: prev.bottomRight.y, y: 1 - prev.bottomRight.x },
+            bottomRight: { x: prev.bottomLeft.y, y: 1 - prev.bottomLeft.x },
+            bottomLeft: { x: prev.topLeft.y, y: 1 - prev.topLeft.x }
+          };
+        }
+      });
+    };
+    img.src = rawImage;
   };
 
   // Capture video frame from camera & proceed to Crop Screen with Adobe Scan Shutter Flash
@@ -382,7 +431,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     reader.readAsDataURL(f);
   };
 
-  // Apply True 4-Corner Homography Perspective Crop & Rotation to produce final scanner image
+  // Apply True 4-Corner Homography Perspective Crop to produce final scanner image
   const applyCropAndProceed = () => {
     if (!rawImage) {
       setStep(3);
@@ -395,26 +444,16 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       const srcW = img.width;
       const srcH = img.height;
 
-      // Handle rotation transformations
       const rotCanvas = document.createElement('canvas');
+      rotCanvas.width = srcW;
+      rotCanvas.height = srcH;
       const rotCtx = rotCanvas.getContext('2d');
       if (!rotCtx) {
         setCroppedImage(rawImage);
         setStep(3);
         return;
       }
-
-      if (rotation === 90 || rotation === 270) {
-        rotCanvas.width = srcH;
-        rotCanvas.height = srcW;
-      } else {
-        rotCanvas.width = srcW;
-        rotCanvas.height = srcH;
-      }
-
-      rotCtx.translate(rotCanvas.width / 2, rotCanvas.height / 2);
-      rotCtx.rotate((rotation * Math.PI) / 180);
-      rotCtx.drawImage(img, -srcW / 2, -srcH / 2);
+      rotCtx.drawImage(img, 0, 0);
 
       // Define exact 4 corner coordinates from quadCorners percentages
       const corners: QuadCorners = {
@@ -662,7 +701,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setRotation((prev) => (prev + 270) % 360)}
+                  onClick={() => rotateRawImageCanvas(false)}
                   className="p-2 rounded-xl bg-white/10 text-white/80 hover:text-amber-400 hover:bg-white/20 transition-colors"
                   title="Rotate Left"
                 >
@@ -670,7 +709,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setRotation((prev) => (prev + 90) % 360)}
+                  onClick={() => rotateRawImageCanvas(true)}
                   className="p-2 rounded-xl bg-white/10 text-white/80 hover:text-amber-400 hover:bg-white/20 transition-colors"
                   title="Rotate Right"
                 >
@@ -762,8 +801,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   <img
                     src={rawImage}
                     alt="Captured for crop"
-                    style={{ transform: `rotate(${rotation}deg)` }}
-                    className="w-full h-full object-cover pointer-events-none transition-transform duration-200"
+                    className="w-full h-full object-contain pointer-events-none transition-all duration-200"
                   />
 
                   {/* SVG Document Boundary Polygon Mesh with Connecting Lines */}
