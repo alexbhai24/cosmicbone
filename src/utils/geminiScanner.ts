@@ -84,8 +84,20 @@ Respond ONLY with a raw JSON object (no markdown formatting, no \`\`\`json) in t
       throw new Error('No text returned from Gemini');
     }
 
+    // Strip markdown formatting if Gemini wrapped it in ```json
+    let cleanText = resultText.trim();
+    if (cleanText.startsWith('```json')) {
+      cleanText = cleanText.substring(7);
+    } else if (cleanText.startsWith('```')) {
+      cleanText = cleanText.substring(3);
+    }
+    if (cleanText.endsWith('```')) {
+      cleanText = cleanText.substring(0, cleanText.length - 3);
+    }
+    cleanText = cleanText.trim();
+
     // Try to parse the JSON response
-    const parsed = JSON.parse(resultText.trim());
+    const parsed = JSON.parse(cleanText);
     return {
       corners: parsed.corners || null,
       text: parsed.text || ''
