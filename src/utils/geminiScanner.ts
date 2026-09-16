@@ -57,11 +57,7 @@ Respond ONLY with a raw JSON object (no markdown formatting, no \`\`\`json) in t
           }
         ]
       }
-    ],
-    generationConfig: {
-      temperature: 0.1,
-      response_mime_type: "application/json"
-    }
+    ]
   };
 
   try {
@@ -84,26 +80,22 @@ Respond ONLY with a raw JSON object (no markdown formatting, no \`\`\`json) in t
       throw new Error('No text returned from Gemini');
     }
 
-    // Strip markdown formatting if Gemini wrapped it in ```json
-    let cleanText = resultText.trim();
-    if (cleanText.startsWith('```json')) {
-      cleanText = cleanText.substring(7);
-    } else if (cleanText.startsWith('```')) {
-      cleanText = cleanText.substring(3);
+    // Use regex to extract the first JSON object in case Gemini includes extra conversational text
+    let jsonString = resultText;
+    const jsonRegex = /\{[\s\S]*\}/;
+    const match = resultText.match(jsonRegex);
+    if (match) {
+      jsonString = match[0];
     }
-    if (cleanText.endsWith('```')) {
-      cleanText = cleanText.substring(0, cleanText.length - 3);
-    }
-    cleanText = cleanText.trim();
 
     // Try to parse the JSON response
-    const parsed = JSON.parse(cleanText);
+    const parsed = JSON.parse(jsonString);
     return {
       corners: parsed.corners || null,
       text: parsed.text || ''
     };
-  } catch (err) {
+  } catch (err: any) {
     console.error("Gemini Scan Error:", err);
-    throw err;
+    throw new Error(`Gemini Scan Error: ${err.message || err}`);
   }
 }

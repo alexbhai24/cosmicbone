@@ -389,9 +389,9 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
              setNote(result.text); // Pre-fill the extracted text!
           }
 
-        } catch (err) {
+        } catch (err: any) {
           console.error('AI Scanning failed:', err);
-          alert('AI Scanning failed. Using default corners.');
+          alert(`AI Scanning failed: ${err.message || err}. Using default corners.`);
           setQuadCorners({
             topLeft: { x: 0.05, y: 0.08 },
             topRight: { x: 0.95, y: 0.08 },
@@ -464,9 +464,9 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         if (result.text) {
            setNote(result.text);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('AI Scanning failed:', err);
-        alert('AI Scanning failed. Using default corners.');
+        alert(`AI Scanning failed: ${err.message || err}. Using default corners.`);
         setQuadCorners({
           topLeft: { x: 0.05, y: 0.08 },
           topRight: { x: 0.95, y: 0.08 },
