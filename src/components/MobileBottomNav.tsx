@@ -35,6 +35,7 @@ import {
   DetectedBlock,
   QuadCorners
 } from '../utils/scannerVision';
+import { processImageWithGemini } from '../utils/geminiScanner';
 
 interface NavItem {
   id: PageRoute;
@@ -70,6 +71,9 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   // Captured raw image vs cropped final image
   const [rawImage, setRawImage] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
+  
+  // AI Scanning Loading State
+  const [isAILoading, setIsAILoading] = useState(false);
   const [rotation, setRotation] = useState<number>(0);
 
   // 4-Corner quad crop percentages (0..1)
@@ -236,69 +240,8 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     };
   }, [step]);
 
-  // Live corner identification sampling loop (runs when step === 1 and scanMode !== 'off')
-  useEffect(() => {
-    if (step !== 1 || scanMode === 'off') {
-      setDetectedQuad(prev => ({ ...prev, isDetected: false }));
-      return;
-    }
-
-    const intervalId = setInterval(() => {
-      if (!videoRef.current) return;
-      const video = videoRef.current;
-      if (video.readyState < 2 || video.paused) return;
-
-      const vw = video.videoWidth || 640;
-      const vh = video.videoHeight || 480;
-      const sqSize = Math.min(vw, vh);
-      const cropX = Math.round((vw - sqSize) / 2);
-      const cropY = Math.round((vh - sqSize) / 2);
-
-      // Re-use canvas to prevent memory leaks and GC freezes on mobile
-      let sampleCanvas = (window as any)._scannerSampleCanvas as HTMLCanvasElement;
-      if (!sampleCanvas) {
-        sampleCanvas = document.createElement('canvas');
-        sampleCanvas.width = 160;
-        sampleCanvas.height = 160;
-        (window as any)._scannerSampleCanvas = sampleCanvas;
-      }
-      
-      const ctx = sampleCanvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return;
-
-      ctx.drawImage(video, cropX, cropY, sqSize, sqSize, 0, 0, 160, 160);
-
-      const rawCorners = scanMode === 'question'
-        ? detectQuestionCorners(sampleCanvas)
-        : detectDocumentCorners(sampleCanvas, 0.05);
-
-      const isDefaultDoc = scanMode === 'doc' && rawCorners.topLeft.x === Math.round(160 * 0.05);
-      const isDefaultQuestion = scanMode === 'question' && rawCorners.topLeft.x === Math.round(160 * 0.08);
-
-      if (isDefaultDoc || isDefaultQuestion) {
-        stableCountRef.current = 0;
-        setDetectedQuad(prev => ({ ...prev, isDetected: false }));
-        return;
-      }
-
-      // Require consecutive valid frames to "lock on" so it takes time to correctly identify
-      stableCountRef.current += 1;
-
-      if (stableCountRef.current >= 10) { // Requires ~1.5 seconds of seeing a document to lock on
-        const w = 160;
-        const h = 160;
-        setDetectedQuad({
-          isDetected: true,
-          topLeft: { x: Math.max(0.01, Math.min(0.99, rawCorners.topLeft.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.topLeft.y / h)) },
-          topRight: { x: Math.max(0.01, Math.min(0.99, rawCorners.topRight.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.topRight.y / h)) },
-          bottomRight: { x: Math.max(0.01, Math.min(0.99, rawCorners.bottomRight.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.bottomRight.y / h)) },
-          bottomLeft: { x: Math.max(0.01, Math.min(0.99, rawCorners.bottomLeft.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.bottomLeft.y / h)) }
-        });
-      }
-    }, 150);
-
-    return () => clearInterval(intervalId);
-  }, [step, scanMode]);
+  // Real-time local corner detection has been removed for a lag-free experience.
+  // The frame will now be captured immediately upon shutter click and sent to AI.
 
   // Flashlight toggle handler
   const toggleFlashlight = async () => {
@@ -364,7 +307,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   };
 
   // Capture video frame from camera & proceed to Crop Screen with Adobe Scan Shutter Flash
-  const captureFrameToCrop = () => {
+  const captureFrameToCrop = async () => {
     if (videoRef.current) {
       const video = videoRef.current;
       const vw = video.videoWidth || 1280;
@@ -382,40 +325,6 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       if (ctx) {
         ctx.drawImage(video, cropX, cropY, sqSize, sqSize, 0, 0, sqSize, sqSize);
         
-        // Auto-detect quad corners depending on selected Scanner Level Mode
-        let corners: QuadCorners;
-        if (scanMode === 'question') {
-          corners = detectQuestionCorners(canvas);
-        } else if (scanMode === 'doc') {
-          corners = detectDocumentCorners(canvas);
-        } else {
-          // Normal 1:1 Photo Mode (full square crop bounds)
-          corners = {
-            topLeft: { x: 0.02 * canvas.width, y: 0.02 * canvas.height },
-            topRight: { x: 0.98 * canvas.width, y: 0.02 * canvas.height },
-            bottomRight: { x: 0.98 * canvas.width, y: 0.98 * canvas.height },
-            bottomLeft: { x: 0.02 * canvas.width, y: 0.98 * canvas.height }
-          };
-        }
-
-        const w = canvas.width;
-        const h = canvas.height;
-        if (w > 0 && h > 0) {
-          setQuadCorners({
-            topLeft: { x: Math.max(0.01, corners.topLeft.x / w), y: Math.max(0.01, corners.topLeft.y / h) },
-            topRight: { x: Math.min(0.99, corners.topRight.x / w), y: Math.max(0.01, corners.topRight.y / h) },
-            bottomRight: { x: Math.min(0.99, corners.bottomRight.x / w), y: Math.min(0.99, corners.bottomRight.y / h) },
-            bottomLeft: { x: Math.max(0.01, corners.bottomLeft.x / w), y: Math.min(0.99, corners.bottomLeft.y / h) }
-          });
-        } else {
-          setQuadCorners({
-            topLeft: { x: 0.05, y: 0.08 },
-            topRight: { x: 0.95, y: 0.08 },
-            bottomRight: { x: 0.95, y: 0.92 },
-            bottomLeft: { x: 0.05, y: 0.92 }
-          });
-        }
-
         const dataUrl = canvas.toDataURL('image/jpeg', 0.94);
         setRawImage(dataUrl);
         setRotation(0);
@@ -426,9 +335,73 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         // Adobe Scan Shutter Flash trigger
         setIsScanningFlash(true);
         setTimeout(() => {
-          setStep(2);
           setIsScanningFlash(false);
         }, 320);
+
+        if (scanMode === 'off') {
+          // Normal 1:1 Photo Mode (full square crop bounds)
+          setQuadCorners({
+            topLeft: { x: 0.02, y: 0.02 },
+            topRight: { x: 0.98, y: 0.02 },
+            bottomRight: { x: 0.98, y: 0.98 },
+            bottomLeft: { x: 0.02, y: 0.98 }
+          });
+          setStep(2);
+          return;
+        }
+
+        // --- GEMINI AI SCANNING INTEGRATION ---
+        const apiKey = localStorage.getItem('gemini_api_key');
+        if (!apiKey) {
+          alert('Gemini API Key is missing. Please set it to use AI Scanning.');
+          setQuadCorners({
+            topLeft: { x: 0.05, y: 0.08 },
+            topRight: { x: 0.95, y: 0.08 },
+            bottomRight: { x: 0.95, y: 0.92 },
+            bottomLeft: { x: 0.05, y: 0.92 }
+          });
+          setStep(2);
+          return;
+        }
+
+        try {
+          setIsAILoading(true);
+          const result = await processImageWithGemini(dataUrl, apiKey, scanMode);
+          
+          if (result.corners) {
+             setQuadCorners({
+                topLeft: { x: Math.max(0.01, Math.min(0.99, result.corners.topLeft.x)), y: Math.max(0.01, Math.min(0.99, result.corners.topLeft.y)) },
+                topRight: { x: Math.max(0.01, Math.min(0.99, result.corners.topRight.x)), y: Math.max(0.01, Math.min(0.99, result.corners.topRight.y)) },
+                bottomRight: { x: Math.max(0.01, Math.min(0.99, result.corners.bottomRight.x)), y: Math.max(0.01, Math.min(0.99, result.corners.bottomRight.y)) },
+                bottomLeft: { x: Math.max(0.01, Math.min(0.99, result.corners.bottomLeft.x)), y: Math.max(0.01, Math.min(0.99, result.corners.bottomLeft.y)) }
+             });
+          } else {
+             // Fallback
+             setQuadCorners({
+                topLeft: { x: 0.05, y: 0.08 },
+                topRight: { x: 0.95, y: 0.08 },
+                bottomRight: { x: 0.95, y: 0.92 },
+                bottomLeft: { x: 0.05, y: 0.92 }
+             });
+          }
+
+          if (result.text) {
+             setNote(result.text); // Pre-fill the extracted text!
+          }
+
+        } catch (err) {
+          console.error('AI Scanning failed:', err);
+          alert('AI Scanning failed. Using default corners.');
+          setQuadCorners({
+            topLeft: { x: 0.05, y: 0.08 },
+            topRight: { x: 0.95, y: 0.08 },
+            bottomRight: { x: 0.95, y: 0.92 },
+            bottomLeft: { x: 0.05, y: 0.92 }
+          });
+        } finally {
+          setIsAILoading(false);
+          setStep(2);
+        }
       }
     }
   };
@@ -684,33 +657,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   className="absolute inset-0 w-full h-full object-cover"
                 />
 
-                {/* Live 4 Blue Corner Dots Identification System Overlay (Matching User Screenshot) */}
-                {scanMode !== 'off' && detectedQuad.isDetected && (
-                  <>
-                    {/* Quad Polygon Highlight */}
-                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none z-40">
-                      <polygon
-                        points={`${detectedQuad.topLeft.x * 100},${detectedQuad.topLeft.y * 100} ${detectedQuad.topRight.x * 100},${detectedQuad.topRight.y * 100} ${detectedQuad.bottomRight.x * 100},${detectedQuad.bottomRight.y * 100} ${detectedQuad.bottomLeft.x * 100},${detectedQuad.bottomLeft.y * 100}`}
-                        fill={scanMode === 'question' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(37, 99, 235, 0.18)'}
-                        stroke={scanMode === 'question' ? '#fbbf24' : '#2563eb'}
-                        strokeWidth="1.5"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    </svg>
-
-                    {/* 4 Blue Circular Corner Identification Dots */}
-                    <div className="absolute w-7 h-7 rounded-full bg-[#2563eb] border-2 border-white shadow-[0_0_12px_rgba(37,99,235,0.9)] -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 transition-all duration-150" style={{ left: `${detectedQuad.topLeft.x * 100}%`, top: `${detectedQuad.topLeft.y * 100}%` }} />
-                    <div className="absolute w-7 h-7 rounded-full bg-[#2563eb] border-2 border-white shadow-[0_0_12px_rgba(37,99,235,0.9)] -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 transition-all duration-150" style={{ left: `${detectedQuad.topRight.x * 100}%`, top: `${detectedQuad.topRight.y * 100}%` }} />
-                    <div className="absolute w-7 h-7 rounded-full bg-[#2563eb] border-2 border-white shadow-[0_0_12px_rgba(37,99,235,0.9)] -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 transition-all duration-150" style={{ left: `${detectedQuad.bottomRight.x * 100}%`, top: `${detectedQuad.bottomRight.y * 100}%` }} />
-                    <div className="absolute w-7 h-7 rounded-full bg-[#2563eb] border-2 border-white shadow-[0_0_12px_rgba(37,99,235,0.9)] -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 transition-all duration-150" style={{ left: `${detectedQuad.bottomLeft.x * 100}%`, top: `${detectedQuad.bottomLeft.y * 100}%` }} />
-
-                    {/* Floating Center Badge */}
-                    <div className="absolute z-50 bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/20 text-white font-semibold text-xs shadow-2xl flex items-center gap-2 pointer-events-none animate-pulse">
-                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                      <span>{scanMode === 'question' ? 'Question detected... hold steady' : 'Capturing... hold steady'}</span>
-                    </div>
-                  </>
-                )}
+                {/* Live Tracking overlay removed to eliminate lag */}
 
                 {/* Shutter Camera Flash Animation Overlay */}
                 {isScanningFlash && (
@@ -722,11 +669,12 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   </div>
                 )}
 
-                {!hasCamera && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-[#101424] text-white/60 space-y-3 z-30">
-                    <Camera className="w-12 h-12 text-cyan-400 animate-pulse" />
-                    <p className="text-xs font-semibold text-white">Align document or text inside 1:1 camera frame</p>
-                    <p className="text-[11px] text-white/50">Adobe Scan computer vision active</p>
+                {/* AI Scanning Loading Overlay */}
+                {isAILoading && (
+                  <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-4">
+                    <ScanLine className="w-12 h-12 text-cyan-400 animate-spin" />
+                    <p className="text-white font-bold animate-pulse text-sm">Gemini AI Analyzing Document...</p>
+                    <p className="text-white/60 text-xs">Finding corners & extracting text</p>
                   </div>
                 )}
 
