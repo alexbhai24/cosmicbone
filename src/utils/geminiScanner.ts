@@ -9,9 +9,6 @@ export interface GeminiScanResult {
 }
 
 export async function processImageWithGemini(base64Image: string, apiKey: string, mode: 'doc' | 'question'): Promise<GeminiScanResult> {
-  const modelName = import.meta.env.VITE_BONE_AI_MODEL || 'gemini-1.5-flash';
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-
   // Remove the data URI prefix if it exists
   const base64Data = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
@@ -62,23 +59,53 @@ Respond ONLY with a raw JSON object (no markdown formatting, no \`\`\`json) in t
   };
 
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+    const configuredModel = import.meta.env.VITE_BONE_AI_MODEL;
+    const candidateModels = Array.from(new Set([
+      configuredModel,
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-pro',
+      'gemini-flash-latest',
+      'gemini-pro-latest'
+    ].filter(Boolean)));
 
-    if (!response.ok) {
-      throw new Error(`Gemini API Error: ${response.status} ${response.statusText}`);
+    let resultText = null;
+    let lastError = null;
+
+    for (const modelName of candidateModels) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          if (response.status === 404 || response.status === 400) {
+             lastError = new Error(`Model ${modelName} returned ${response.status}`);
+             continue; // Try next model
+          }
+          throw new Error(`Gemini API Error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        
+        if (resultText) {
+          break; // Success!
+        }
+      } catch (err) {
+        lastError = err;
+        continue;
+      }
     }
 
-    const data = await response.json();
-    const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
     if (!resultText) {
-      throw new Error('No text returned from Gemini');
+      throw lastError || new Error('No text returned from Gemini after trying all models.');
     }
 
     // Use regex to extract the first JSON object in case Gemini includes extra conversational text
