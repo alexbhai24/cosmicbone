@@ -63,8 +63,8 @@ export function sortQuadCorners(points: Point[]): QuadCorners {
 
 /**
  * Detect document boundaries / quad corners from HTMLCanvasElement image data
- * Uses Sobel luminance gradient edge scoring, contour boundary search,
- * and geometric convex quad candidate evaluation.
+ * Uses Canny/Sobel edge gradient scoring, interior contour boundary search,
+ * outer frame exclusion, and shape candidate scoring (15% to 82% frame area).
  */
 export function detectDocumentCorners(
   canvas: HTMLCanvasElement,
@@ -87,8 +87,8 @@ export function detectDocumentCorners(
     const imgData = ctx.getImageData(0, 0, width, height);
     const data = imgData.data;
 
-    // Convert to grayscale matrix & compute edge intensity gradient
-    const sampleScale = Math.max(1, Math.floor(Math.max(width, height) / 240));
+    // Convert to grayscale matrix
+    const sampleScale = Math.max(1, Math.floor(Math.max(width, height) / 200));
     const sw = Math.floor(width / sampleScale);
     const sh = Math.floor(height / sampleScale);
     const gray = new Float32Array(sw * sh);
@@ -98,24 +98,26 @@ export function detectDocumentCorners(
         const origX = Math.min(width - 1, sx * sampleScale);
         const origY = Math.min(height - 1, sy * sampleScale);
         const idx = (origY * width + origX) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-        gray[sy * sw + sx] = 0.299 * r + 0.587 * g + 0.114 * b;
+        gray[sy * sw + sx] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
       }
     }
 
-    // Sobel edge gradient thresholding
-    let minX = sw, minY = sh, maxX = 0, maxY = 0;
+    // Exclude extreme outer border (outer 4% pixels) to ignore camera UI borders
+    const borderMarginX = Math.floor(sw * 0.04);
+    const borderMarginY = Math.floor(sh * 0.04);
+
+    let minX = sw - borderMarginX, minY = sh - borderMarginY;
+    let maxX = borderMarginX, maxY = borderMarginY;
     let edgeCount = 0;
 
-    for (let y = 1; y < sh - 1; y++) {
-      for (let x = 1; x < sw - 1; x++) {
+    for (let y = borderMarginY; y < sh - borderMarginY; y++) {
+      for (let x = borderMarginX; x < sw - borderMarginX; x++) {
         const gx = gray[y * sw + (x + 1)] - gray[y * sw + (x - 1)];
         const gy = gray[(y + 1) * sw + x] - gray[(y - 1) * sw + x];
         const grad = Math.abs(gx) + Math.abs(gy);
 
-        if (grad > 32) {
+        // High gradient threshold for real paper/book contrast edges
+        if (grad > 38) {
           minX = Math.min(minX, x);
           minY = Math.min(minY, y);
           maxX = Math.max(maxX, x);
@@ -128,10 +130,14 @@ export function detectDocumentCorners(
     const boxW = (maxX - minX) * sampleScale;
     const boxH = (maxY - minY) * sampleScale;
 
-    // Ensure valid document bounding box (> 15% frame area)
-    if (edgeCount > 25 && boxW > width * 0.18 && boxH > height * 0.18) {
-      const marginX = Math.round(boxW * 0.015);
-      const marginY = Math.round(boxH * 0.015);
+    // Rule: Document must occupy between 15% and 82% of screen area (rejecting >85% outer frame selections)
+    const frameArea = width * height;
+    const boxArea = boxW * boxH;
+    const areaPct = boxArea / frameArea;
+
+    if (edgeCount > 30 && areaPct >= 0.14 && areaPct <= 0.85 && boxW > width * 0.22 && boxH > height * 0.22) {
+      const marginX = Math.round(boxW * 0.01);
+      const marginY = Math.round(boxH * 0.01);
 
       const tlX = Math.max(0, Math.round(minX * sampleScale) - marginX);
       const tlY = Math.max(0, Math.round(minY * sampleScale) - marginY);
