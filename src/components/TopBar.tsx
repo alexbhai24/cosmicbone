@@ -100,7 +100,7 @@ export const TopBar: React.FC = () => {
   ];
 
   const bgLabels: Record<BackgroundType, string> = {
-    'app-bg': 'App Background',
+    'app-bg': 'Custom',
     'lighthouse': 'Lighthouse',
     'snowy-tree': 'Snowy Tree',
     'canyon-castle': 'Canyon Castle',

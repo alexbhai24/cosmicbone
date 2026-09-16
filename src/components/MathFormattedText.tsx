@@ -28,7 +28,7 @@ export const MathFormattedText: React.FC<MathFormattedTextProps> = ({ text, clas
           const expr = part.slice(1, -1).trim();
           try {
             const html = katex.renderToString(expr, { displayMode: false, throwOnError: false });
-            return <span key={idx} className="max-w-full overflow-x-auto inline-block align-middle" dangerouslySetInnerHTML={{ __html: html }} />;
+            return <span key={idx} dangerouslySetInnerHTML={{ __html: html }} />;
           } catch {
             return <span key={idx}>{part}</span>;
           }
@@ -72,7 +72,7 @@ export const MathFormattedText: React.FC<MathFormattedTextProps> = ({ text, clas
 
       try {
         const html = katex.renderToString(line, { displayMode: block, throwOnError: false });
-        return <div key={lineIdx} className={`max-w-full overflow-x-auto ${lineIdx > 0 ? 'mt-1.5' : ''}`} dangerouslySetInnerHTML={{ __html: html }} />;
+        return <div key={lineIdx} className={`max-w-full ${block ? 'overflow-x-auto' : 'inline-block'} ${lineIdx > 0 ? 'mt-1.5' : ''}`} dangerouslySetInnerHTML={{ __html: html }} />;
       } catch {
         return <div key={lineIdx} className={lineIdx > 0 ? 'mt-1.5' : ''}>{line}</div>;
       }

@@ -55,7 +55,6 @@ const NAV_ITEMS: NavItem[] = [
 const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
   const stableCountRef = useRef(0);
   const stableCenterRef = useRef({ x: 0, y: 0 });
 
@@ -130,11 +129,38 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   // Aggressive camera hardware stream kill function
   const stopCamera = () => {
-    // No-op since we are using native camera now
+    try {
+      if (videoRef.current) {
+        if (videoRef.current.srcObject) {
+          const s = videoRef.current.srcObject as MediaStream;
+          s.getTracks().forEach(track => {
+            try {
+              track.stop();
+              track.enabled = false;
+            } catch {}
+          });
+          videoRef.current.srcObject = null;
+        }
+      }
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          try {
+            track.stop();
+            track.enabled = false;
+          } catch {}
+        });
+        setStream(null);
+      }
+    } catch (e) {
+      console.warn('Camera stop error:', e);
+    }
+    setFlashlightOn(false);
+    setHasCamera(false);
   };
 
-  // Close scanner
+  // Close scanner and ensure 100% hardware camera light kill
   const handleClose = () => {
+    stopCamera();
     onClose();
   };
 
@@ -163,7 +189,54 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   // Initialize live camera stream when in Step 1
   useEffect(() => {
-    // Native camera doesn't need getUserMedia initialization
+    let currentStream: MediaStream | null = null;
+    let isMounted = true;
+
+    async function initCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+      try {
+        let mediaStream: MediaStream;
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          });
+        } catch {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } }
+          });
+        }
+        currentStream = mediaStream;
+        if (isMounted) {
+          setStream(mediaStream);
+          setHasCamera(true);
+          if (videoRef.current) {
+            videoRef.current.srcObject = mediaStream;
+            videoRef.current.play().catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.log('Camera error:', err);
+        if (isMounted) setHasCamera(false);
+      }
+    }
+
+    if (step === 1) {
+      initCamera();
+    } else {
+      stopCamera();
+    }
+
+    return () => {
+      isMounted = false;
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => {
+          try {
+            track.stop();
+            track.enabled = false;
+          } catch {}
+        });
+      }
+    };
   }, [step]);
 
   // Real-time local corner detection has been removed for a lag-free experience.
@@ -171,7 +244,24 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   // Flashlight toggle handler
   const toggleFlashlight = async () => {
-    alert("Flashlight is controlled inside your device's native camera app.");
+    if (stream) {
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        try {
+          const capabilities = (track as any).getCapabilities ? (track as any).getCapabilities() : {};
+          if (capabilities?.torch) {
+            await track.applyConstraints({ advanced: [{ torch: !flashlightOn }] as any });
+            setFlashlightOn(!flashlightOn);
+          } else {
+            alert('Flashlight (Torch) is not supported on this browser/device.');
+            setFlashlightOn(!flashlightOn); // Still toggle visually
+          }
+        } catch (err) {
+          alert('Failed to toggle flashlight: ' + (err as Error).message);
+          setFlashlightOn(!flashlightOn);
+        }
+      }
+    }
   };
 
   // Helper to rotate rawImage data URL by 90 degrees clockwise or counter-clockwise
@@ -217,7 +307,58 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   // Capture video frame from camera & proceed to Crop Screen with Adobe Scan Shutter Flash
   const captureFrameToCrop = async () => {
-    cameraRef.current?.click();
+    if (videoRef.current) {
+      const video = videoRef.current;
+      const vw = video.videoWidth || 1280;
+      const vh = video.videoHeight || 720;
+      
+      // Crop central 1:1 square from video stream to match 1:1 camera viewfinder ratio
+      const sqSize = Math.min(vw, vh);
+      const cropX = Math.round((vw - sqSize) / 2);
+      const cropY = Math.round((vh - sqSize) / 2);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = sqSize;
+      canvas.height = sqSize;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, cropX, cropY, sqSize, sqSize, 0, 0, sqSize, sqSize);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.94);
+        setRawImage(dataUrl);
+        setRotation(0);
+
+        // Turn off camera hardware immediately upon capturing photo frame
+        stopCamera();
+
+        // Adobe Scan Shutter Flash trigger
+        setIsScanningFlash(true);
+        setTimeout(() => {
+          setIsScanningFlash(false);
+        }, 320);
+
+        if (scanMode === 'off') {
+          // Normal 1:1 Photo Mode (full square crop bounds)
+          setQuadCorners({
+            topLeft: { x: 0.02, y: 0.02 },
+            topRight: { x: 0.98, y: 0.02 },
+            bottomRight: { x: 0.98, y: 0.98 },
+            bottomLeft: { x: 0.02, y: 0.98 }
+          });
+          setStep(2);
+          return;
+        }
+
+        // NORMAL CAMERA FALLBACK (NO AI)
+        setQuadCorners({
+          topLeft: { x: 0.05, y: 0.08 },
+          topRight: { x: 0.95, y: 0.08 },
+          bottomRight: { x: 0.95, y: 0.92 },
+          bottomLeft: { x: 0.05, y: 0.92 }
+        });
+        setStep(2);
+      }
+    }
   };
 
   // Gallery File Upload with full vision detection parity
@@ -436,12 +577,14 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <div className="relative flex-1 my-3 flex items-center justify-center overflow-hidden">
               <div className="relative w-full max-w-sm sm:max-w-md aspect-square rounded-3xl overflow-hidden bg-black flex items-center justify-center border-2 border-cyan-400/50 shadow-[0_0_50px_rgba(0,240,255,0.25)]">
                 
-                {/* Placeholder for native camera trigger */}
-                <div className="absolute inset-0 w-full h-full object-cover flex flex-col items-center justify-center bg-gray-900">
-                  <Camera className="w-16 h-16 text-cyan-400/50 mb-4" />
-                  <p className="text-white/70 text-sm font-semibold">Tap capture button below</p>
-                  <p className="text-white/50 text-xs mt-1">Uses your phone's native camera for max quality</p>
-                </div>
+                {/* Live Camera Feed */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
 
                 {/* Live Tracking overlay removed to eliminate lag */}
 
@@ -487,14 +630,6 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <span>Upload from gallery</span>
               </button>
 
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                ref={cameraRef}
-                onChange={handleGalleryFile}
-              />
               <input
                 ref={galleryRef}
                 type="file"
