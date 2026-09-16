@@ -254,10 +254,16 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       const cropX = Math.round((vw - sqSize) / 2);
       const cropY = Math.round((vh - sqSize) / 2);
 
-      const sampleCanvas = document.createElement('canvas');
-      sampleCanvas.width = 160;
-      sampleCanvas.height = 160;
-      const ctx = sampleCanvas.getContext('2d');
+      // Re-use canvas to prevent memory leaks and GC freezes on mobile
+      let sampleCanvas = (window as any)._scannerSampleCanvas as HTMLCanvasElement;
+      if (!sampleCanvas) {
+        sampleCanvas = document.createElement('canvas');
+        sampleCanvas.width = 160;
+        sampleCanvas.height = 160;
+        (window as any)._scannerSampleCanvas = sampleCanvas;
+      }
+      
+      const ctx = sampleCanvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) return;
 
       ctx.drawImage(video, cropX, cropY, sqSize, sqSize, 0, 0, 160, 160);
