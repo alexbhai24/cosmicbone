@@ -48,8 +48,8 @@ Respond ONLY with a raw JSON object (no markdown formatting, no \`\`\`json) in t
         parts: [
           { text: promptText },
           {
-            inline_data: {
-              mime_type: "image/jpeg",
+            inlineData: {
+              mimeType: "image/jpeg",
               data: base64Data
             }
           }
