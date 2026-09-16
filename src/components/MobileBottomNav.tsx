@@ -351,17 +351,23 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         }
 
         // --- GEMINI AI SCANNING INTEGRATION ---
-        const apiKey = localStorage.getItem('gemini_api_key');
+        let apiKey = localStorage.getItem('gemini_api_key');
         if (!apiKey) {
-          alert('Gemini API Key is missing. Please set it to use AI Scanning.');
-          setQuadCorners({
-            topLeft: { x: 0.05, y: 0.08 },
-            topRight: { x: 0.95, y: 0.08 },
-            bottomRight: { x: 0.95, y: 0.92 },
-            bottomLeft: { x: 0.05, y: 0.92 }
-          });
-          setStep(2);
-          return;
+          const userKey = window.prompt("To use the AI Scanner, please paste your Gemini API Key:");
+          if (userKey && userKey.trim()) {
+            apiKey = userKey.trim();
+            localStorage.setItem('gemini_api_key', apiKey);
+          } else {
+            alert('Gemini API Key is required for AI Scanning. Falling back to default corners.');
+            setQuadCorners({
+              topLeft: { x: 0.05, y: 0.08 },
+              topRight: { x: 0.95, y: 0.08 },
+              bottomRight: { x: 0.95, y: 0.92 },
+              bottomLeft: { x: 0.05, y: 0.92 }
+            });
+            setStep(2);
+            return;
+          }
         }
 
         try {
