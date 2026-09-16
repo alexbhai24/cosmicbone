@@ -26,37 +26,37 @@ import { BoneAIFAB } from './components/bone-ai/BoneAIFAB';
 import { BoneAIPopup } from './components/bone-ai/BoneAIPopup';
 
 // Pages
-const HomePage = React.lazy(() => import('./pages/HomePage').then(m => ({ default: m.HomePage })));
-const VideosPage = React.lazy(() => import('./pages/VideosPage').then(m => ({ default: m.VideosPage })));
-const PostsPage = React.lazy(() => import('./pages/PostsPage').then(m => ({ default: m.PostsPage })));
-const DocumentsPage = React.lazy(() => import('./pages/DocumentsPage').then(m => ({ default: m.DocumentsPage })));
-const BooksPage = React.lazy(() => import('./pages/BooksPage').then(m => ({ default: m.BooksPage })));
-const TestsPage = React.lazy(() => import('./pages/TestsPage').then(m => ({ default: m.TestsPage })));
-const PortfolioPage = React.lazy(() => import('./pages/PortfolioPage').then(m => ({ default: m.PortfolioPage })));
-const GamesPage = React.lazy(() => import('./pages/GamesPage').then(m => ({ default: m.GamesPage })));
-const StudyRoomsPage = React.lazy(() => import('./pages/StudyRoomsPage').then(m => ({ default: m.StudyRoomsPage })));
-const AccessDeniedPage = React.lazy(() => import('./pages/AccessDeniedPage').then(m => ({ default: m.AccessDeniedPage })));
-const FocusClockPage = React.lazy(() => import('./pages/FocusClockPage').then(m => ({ default: m.FocusClockPage })));
-const LinkPage = React.lazy(() => import('./pages/LinkPage').then(m => ({ default: m.LinkPage })));
-const FirestoreDashboardPage = React.lazy(() => import('./pages/FirestoreDashboardPage').then(m => ({ default: m.FirestoreDashboardPage })));
-const CreatorPage = React.lazy(() => import('./pages/CreatorPage').then(m => ({ default: m.CreatorPage })));
-const ToolsPage = React.lazy(() => import('./pages/ToolsPage').then(m => ({ default: m.ToolsPage })));
-const SyllabusTrackerPage = React.lazy(() => import('./pages/SyllabusTrackerPage').then(m => ({ default: m.SyllabusTrackerPage })));
-const FlashcardsPage = React.lazy(() => import('./pages/FlashcardsPage').then(m => ({ default: m.FlashcardsPage })));
-const MistakeTrackerPage = React.lazy(() => import('./pages/MistakeTrackerPage').then(m => ({ default: m.MistakeTrackerPage })));
-const PyqPage = React.lazy(() => import('./pages/PyqPage').then(m => ({ default: m.PyqPage })));
-const MockTestsPage = React.lazy(() => import('./pages/MockTestsPage').then(m => ({ default: m.MockTestsPage })));
-const TestInstructionsPage = React.lazy(() => import('./pages/TestInstructionsPage').then(m => ({ default: m.TestInstructionsPage })));
-const NtaTestPage = React.lazy(() => import('./pages/NtaTestPage').then(m => ({ default: m.NtaTestPage })));
-const SleepCyclePage = React.lazy(() => import('./pages/SleepCyclePage').then(m => ({ default: m.SleepCyclePage })));
-const StudyTimeTrackerPage = React.lazy(() => import('./pages/StudyTimeTrackerPage').then(m => ({ default: m.StudyTimeTrackerPage })));
-const MarksCalculatorPage = React.lazy(() => import('./pages/MarksCalculatorPage').then(m => ({ default: m.MarksCalculatorPage })));
-const ExamCountdownPage = React.lazy(() => import('./pages/ExamCountdownPage').then(m => ({ default: m.ExamCountdownPage })));
-const ScheduleDayPage = React.lazy(() => import('./pages/ScheduleDayPage').then(m => ({ default: m.ScheduleDayPage })));
-const BiologyReadingPage = React.lazy(() => import('./pages/BiologyReadingPage').then(m => ({ default: m.BiologyReadingPage })));
-const QuestionPracticePage = React.lazy(() => import('./pages/QuestionPracticePage').then(m => ({ default: m.QuestionPracticePage })));
-const HabitRadarPage = React.lazy(() => import('./pages/HabitRadarPage').then(m => ({ default: m.HabitRadarPage })));
-const BoneAIPage = React.lazy(() => import('./pages/BoneAIPage').then(m => ({ default: m.BoneAIPage })));
+import { HomePage } from './pages/HomePage';
+import { VideosPage } from './pages/VideosPage';
+import { PostsPage } from './pages/PostsPage';
+import { DocumentsPage } from './pages/DocumentsPage';
+import { BooksPage } from './pages/BooksPage';
+import { TestsPage } from './pages/TestsPage';
+import { PortfolioPage } from './pages/PortfolioPage';
+import { GamesPage } from './pages/GamesPage';
+import { StudyRoomsPage } from './pages/StudyRoomsPage';
+import { AccessDeniedPage } from './pages/AccessDeniedPage';
+import { FocusClockPage } from './pages/FocusClockPage';
+import { LinkPage } from './pages/LinkPage';
+import { FirestoreDashboardPage } from './pages/FirestoreDashboardPage';
+import { CreatorPage } from './pages/CreatorPage';
+import { ToolsPage } from './pages/ToolsPage';
+import { SyllabusTrackerPage } from './pages/SyllabusTrackerPage';
+import { FlashcardsPage } from './pages/FlashcardsPage';
+import { MistakeTrackerPage } from './pages/MistakeTrackerPage';
+import { PyqPage } from './pages/PyqPage';
+import { MockTestsPage } from './pages/MockTestsPage';
+import { TestInstructionsPage } from './pages/TestInstructionsPage';
+import { NtaTestPage } from './pages/NtaTestPage';
+import { SleepCyclePage } from './pages/SleepCyclePage';
+import { StudyTimeTrackerPage } from './pages/StudyTimeTrackerPage';
+import { MarksCalculatorPage } from './pages/MarksCalculatorPage';
+import { ExamCountdownPage } from './pages/ExamCountdownPage';
+import { ScheduleDayPage } from './pages/ScheduleDayPage';
+import { BiologyReadingPage } from './pages/BiologyReadingPage';
+import { QuestionPracticePage } from './pages/QuestionPracticePage';
+import { HabitRadarPage } from './pages/HabitRadarPage';
+import { BoneAIPage } from './pages/BoneAIPage';
 
 
 
@@ -245,9 +245,7 @@ const AppContent: React.FC = () => {
         )}
 
         <div key={currentRoute} className="w-full min-h-full animate-in fade-in duration-150 ease-out">
-          <React.Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="w-8 h-8 animate-spin text-cyan-400" /></div>}>
-            {renderRoute()}
-          </React.Suspense>
+          {renderRoute()}
         </div>
       </div>
     );
@@ -289,9 +287,7 @@ const AppContent: React.FC = () => {
         <div className={currentRoute === 'bone-ai' ? 'w-full h-full' : 'max-w-[1366px] mx-auto'}>
           {/* key triggers smooth hardware-accelerated fade transition */}
           <div key={currentRoute} className="w-full h-full animate-in fade-in slide-in-from-bottom-2 duration-200 ease-out">
-            <React.Suspense fallback={<div className="flex items-center justify-center min-h-[50vh]"><Loader2 className="w-8 h-8 animate-spin text-cyan-400" /></div>}>
-              {renderRoute()}
-            </React.Suspense>
+            {renderRoute()}
           </div>
         </div>
       </main>
