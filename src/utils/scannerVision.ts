@@ -118,7 +118,7 @@ export function detectDocumentCorners(
       }
     }
 
-    const adaptiveThreshold = Math.max(36, maxGrad * 0.35); // Keep the strongest 65% of edges
+    const adaptiveThreshold = Math.max(30, maxGrad * 0.25); // Lowered to 25% to catch real borders
 
     const edgePoints: Point[] = [];
     let minSum = Infinity, maxSum = -Infinity;
@@ -128,20 +128,11 @@ export function detectDocumentCorners(
     let ptBR: Point = { x: sw - borderMarginX, y: sh - borderMarginY };
     let ptBL: Point = { x: borderMarginX, y: sh - borderMarginY };
 
-    const centerX = sw / 2;
-    const centerY = sh / 2;
-    const maxDistance = Math.sqrt(centerX * centerX + centerY * centerY);
-
     for (let y = borderMarginY; y < sh - borderMarginY; y++) {
       for (let x = borderMarginX; x < sw - borderMarginX; x++) {
         const grad = gradients[y * sw + x];
         
-        const dx = x - centerX;
-        const dy = y - centerY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const centerWeight = 1 - (distance / maxDistance);
-
-        if (grad * centerWeight > adaptiveThreshold) {
+        if (grad > adaptiveThreshold) {
           edgePoints.push({ x, y });
 
           const sum = x + y;
@@ -517,13 +508,15 @@ export function detectQuestionCorners(
       for (let y = Math.floor(sh * 0.12); y < Math.floor(sh * 0.88); y++) {
         let rowCount = 0;
         for (let x = Math.floor(sw * 0.05); x < Math.floor(sw * 0.95); x++) {
-          if (gray[y * sw + x] < 180) {
+          const gx = Math.abs(gray[y * sw + (x + 1)] - gray[y * sw + (x - 1)]);
+          const gy = Math.abs(gray[(y + 1) * sw + x] - gray[(y - 1) * sw + x]);
+          if (gx + gy > 60) {
             rowCount++;
           }
         }
         projection.push(rowCount);
-        // Simple peak detection (text lines form dense horizontal peaks)
-        if (rowCount > 5) {
+        // A line of printed text creates a horizontal density of edges
+        if (rowCount > Math.floor(sw * 0.08)) {
           if (!inPeak) { peakCount++; inPeak = true; }
         } else {
           inPeak = false;
