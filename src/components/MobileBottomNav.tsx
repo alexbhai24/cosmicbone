@@ -351,23 +351,17 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         }
 
         // --- GEMINI AI SCANNING INTEGRATION ---
-        let apiKey = localStorage.getItem('gemini_api_key');
+        if (!navigator.onLine) {
+          alert('You are currently offline. Internet connection is required for AI Scanning.');
+          setStep(1); // Go back to camera
+          return;
+        }
+
+        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
         if (!apiKey) {
-          const userKey = window.prompt("To use the AI Scanner, please paste your Gemini API Key:");
-          if (userKey && userKey.trim()) {
-            apiKey = userKey.trim();
-            localStorage.setItem('gemini_api_key', apiKey);
-          } else {
-            alert('Gemini API Key is required for AI Scanning. Falling back to default corners.');
-            setQuadCorners({
-              topLeft: { x: 0.05, y: 0.08 },
-              topRight: { x: 0.95, y: 0.08 },
-              bottomRight: { x: 0.95, y: 0.92 },
-              bottomLeft: { x: 0.05, y: 0.92 }
-            });
-            setStep(2);
-            return;
-          }
+          alert('Gemini API Key is missing in .env (VITE_GEMINI_API_KEY).');
+          setStep(1);
+          return;
         }
 
         try {
@@ -417,57 +411,72 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     const f = e.target.files?.[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onloadend = () => {
+    reader.onloadend = async () => {
       const dataUrl = reader.result as string;
       setRawImage(dataUrl);
+      setRotation(0);
+      stopCamera();
 
-      const img = new Image();
-      img.onload = () => {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = img.width;
-        tempCanvas.height = img.height;
-        const tCtx = tempCanvas.getContext('2d');
-        if (tCtx) {
-          tCtx.drawImage(img, 0, 0);
+      if (scanMode === 'off') {
+        setQuadCorners({
+          topLeft: { x: 0.02, y: 0.02 },
+          topRight: { x: 0.98, y: 0.02 },
+          bottomRight: { x: 0.98, y: 0.98 },
+          bottomLeft: { x: 0.02, y: 0.98 }
+        });
+        setStep(2);
+        return;
+      }
 
-          let corners: QuadCorners;
-          if (scanMode === 'question') {
-            corners = detectQuestionCorners(tempCanvas);
-          } else if (scanMode === 'doc') {
-            corners = detectDocumentCorners(tempCanvas, 0.05);
-          } else {
-            corners = {
-              topLeft: { x: 0.02 * img.width, y: 0.02 * img.height },
-              topRight: { x: 0.98 * img.width, y: 0.02 * img.height },
-              bottomRight: { x: 0.98 * img.width, y: 0.98 * img.height },
-              bottomLeft: { x: 0.02 * img.width, y: 0.98 * img.height }
-            };
-          }
+      if (!navigator.onLine) {
+        alert('You are currently offline. Internet connection is required for AI Scanning.');
+        setStep(1);
+        return;
+      }
 
-          const w = img.width;
-          const h = img.height;
-          if (w > 0 && h > 0) {
-            setQuadCorners({
-              topLeft: { x: Math.max(0.01, corners.topLeft.x / w), y: Math.max(0.01, corners.topLeft.y / h) },
-              topRight: { x: Math.min(0.99, corners.topRight.x / w), y: Math.max(0.01, corners.topRight.y / h) },
-              bottomRight: { x: Math.min(0.99, corners.bottomRight.x / w), y: Math.min(0.99, corners.bottomRight.y / h) },
-              bottomLeft: { x: Math.max(0.01, corners.bottomLeft.x / w), y: Math.min(0.99, corners.bottomLeft.y / h) }
-            });
-          } else {
-            setQuadCorners({
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+        alert('Gemini API Key is missing in .env (VITE_GEMINI_API_KEY).');
+        setStep(1);
+        return;
+      }
+
+      try {
+        setIsAILoading(true);
+        const result = await processImageWithGemini(dataUrl, apiKey, scanMode);
+        
+        if (result.corners) {
+           setQuadCorners({
+              topLeft: { x: Math.max(0.01, Math.min(0.99, result.corners.topLeft.x)), y: Math.max(0.01, Math.min(0.99, result.corners.topLeft.y)) },
+              topRight: { x: Math.max(0.01, Math.min(0.99, result.corners.topRight.x)), y: Math.max(0.01, Math.min(0.99, result.corners.topRight.y)) },
+              bottomRight: { x: Math.max(0.01, Math.min(0.99, result.corners.bottomRight.x)), y: Math.max(0.01, Math.min(0.99, result.corners.bottomRight.y)) },
+              bottomLeft: { x: Math.max(0.01, Math.min(0.99, result.corners.bottomLeft.x)), y: Math.max(0.01, Math.min(0.99, result.corners.bottomLeft.y)) }
+           });
+        } else {
+           setQuadCorners({
               topLeft: { x: 0.05, y: 0.08 },
               topRight: { x: 0.95, y: 0.08 },
               bottomRight: { x: 0.95, y: 0.92 },
               bottomLeft: { x: 0.05, y: 0.92 }
-            });
-          }
+           });
         }
-      };
-      img.src = dataUrl;
 
-      setRotation(0);
-      stopCamera();
-      setStep(2);
+        if (result.text) {
+           setNote(result.text);
+        }
+      } catch (err) {
+        console.error('AI Scanning failed:', err);
+        alert('AI Scanning failed. Using default corners.');
+        setQuadCorners({
+          topLeft: { x: 0.05, y: 0.08 },
+          topRight: { x: 0.95, y: 0.08 },
+          bottomRight: { x: 0.95, y: 0.92 },
+          bottomLeft: { x: 0.05, y: 0.92 }
+        });
+      } finally {
+        setIsAILoading(false);
+        setStep(2);
+      }
     };
     reader.readAsDataURL(f);
   };
