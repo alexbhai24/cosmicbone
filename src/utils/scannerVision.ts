@@ -128,11 +128,20 @@ export function detectDocumentCorners(
     let ptBR: Point = { x: sw - borderMarginX, y: sh - borderMarginY };
     let ptBL: Point = { x: borderMarginX, y: sh - borderMarginY };
 
+    const centerX = sw / 2;
+    const centerY = sh / 2;
+    const maxDistance = Math.sqrt(centerX * centerX + centerY * centerY);
+
     for (let y = borderMarginY; y < sh - borderMarginY; y++) {
       for (let x = borderMarginX; x < sw - borderMarginX; x++) {
         const grad = gradients[y * sw + x];
+        
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const centerWeight = 1 - (distance / maxDistance);
 
-        if (grad > adaptiveThreshold) {
+        if (grad * centerWeight > adaptiveThreshold) {
           edgePoints.push({ x, y });
 
           const sum = x + y;
@@ -330,9 +339,13 @@ export function segmentPageLayout(
   const height = canvas.height;
 
   const cleanText = (ocrText || '').trim();
-  const isMCQPattern = /(?:[Qq]\d+|\d+[\.\)])|(?:\([AaBbCcDd1234]\)|[AaBbCcDd1234][\.\)])/.test(cleanText);
+  
+  const hasQuestionNumber = /^\\d+[\\.\\)]/m.test(cleanText);
+  const hasOptions = /A[\\)\\.].*B[\\)\\.]/is.test(cleanText);
+  const hasQuestionWords = /(which|what|calculate|find|determine|solve|identify)/i.test(cleanText);
+  const isQuestion = hasQuestionNumber || hasOptions || hasQuestionWords;
 
-  if (isMCQPattern && cleanText.length > 20) {
+  if (isQuestion && cleanText.length > 20) {
     const mcqParsed = parseMCQFromText(cleanText);
 
     const mcqCanvas = document.createElement('canvas');
@@ -419,12 +432,7 @@ export function parseMCQFromText(text: string): { questionText: string; options:
   }
 
   if (options.length === 0) {
-    options.push(
-      { label: 'A', text: 'Option A' },
-      { label: 'B', text: 'Option B' },
-      { label: 'C', text: 'Option C' },
-      { label: 'D', text: 'Option D' }
-    );
+    // If OCR misses options, we do NOT generate fake options.
   }
 
   return {
@@ -482,8 +490,8 @@ export function detectQuestionCorners(
         const gy = Math.abs(gray[(y + 1) * sw + x] - gray[(y - 1) * sw + x]);
         const grad = gx + gy;
 
-        // High gradient threshold for printed ink letters & equations
-        if (grad > 40) {
+        // Dynamic gradient threshold
+        if (grad > 85) {
           minX = Math.min(minX, x);
           minY = Math.min(minY, y);
           maxX = Math.max(maxX, x);
@@ -495,22 +503,49 @@ export function detectQuestionCorners(
 
     const boxW = (maxX - minX) * sampleScale;
     const boxH = (maxY - minY) * sampleScale;
+    
+    // Dynamic text edge count threshold
+    const minEdgeReq = Math.max(80, sw * sh * 0.01);
 
-    if (textEdgeCount > 15 && boxW > width * 0.25 && boxH > height * 0.15) {
-      const marginX = Math.round(boxW * 0.02);
-      const marginY = Math.round(boxH * 0.02);
+    if (textEdgeCount > minEdgeReq && boxW > width * 0.25 && boxH > height * 0.15) {
+      
+      // Horizontal Text Density Projection
+      const projection: number[] = [];
+      let peakCount = 0;
+      let inPeak = false;
 
-      const tlX = Math.max(0, Math.round(minX * sampleScale) - marginX);
-      const tlY = Math.max(0, Math.round(minY * sampleScale) - marginY);
-      const brX = Math.min(width, Math.round(maxX * sampleScale) + marginX);
-      const brY = Math.min(height, Math.round(maxY * sampleScale) + marginY);
+      for (let y = Math.floor(sh * 0.12); y < Math.floor(sh * 0.88); y++) {
+        let rowCount = 0;
+        for (let x = Math.floor(sw * 0.05); x < Math.floor(sw * 0.95); x++) {
+          if (gray[y * sw + x] < 180) {
+            rowCount++;
+          }
+        }
+        projection.push(rowCount);
+        // Simple peak detection (text lines form dense horizontal peaks)
+        if (rowCount > 5) {
+          if (!inPeak) { peakCount++; inPeak = true; }
+        } else {
+          inPeak = false;
+        }
+      }
 
-      return sortQuadCorners([
-        { x: tlX, y: tlY },
-        { x: brX, y: tlY },
-        { x: brX, y: brY },
-        { x: tlX, y: brY }
-      ]);
+      if (peakCount >= 2) {
+        const marginX = Math.round(boxW * 0.02);
+        const marginY = Math.round(boxH * 0.02);
+
+        const tlX = Math.max(0, Math.round(minX * sampleScale) - marginX);
+        const tlY = Math.max(0, Math.round(minY * sampleScale) - marginY);
+        const brX = Math.min(width, Math.round(maxX * sampleScale) + marginX);
+        const brY = Math.min(height, Math.round(maxY * sampleScale) + marginY);
+
+        return sortQuadCorners([
+          { x: tlX, y: tlY },
+          { x: brX, y: tlY },
+          { x: brX, y: brY },
+          { x: tlX, y: brY }
+        ]);
+      }
     }
   } catch (err) {
     console.warn('Question corner detection fallback:', err);
@@ -572,7 +607,7 @@ export function verifyIsRealDocument(
     const centerX = Math.round((corners.topLeft.x + corners.topRight.x + corners.bottomRight.x + corners.bottomLeft.x) / 4);
     const centerY = Math.round((corners.topLeft.y + corners.topRight.y + corners.bottomRight.y + corners.bottomLeft.y) / 4);
 
-    let paperPixelCount = 0;
+    let whitePixelCount = 0;
     let highGradientEdgeCount = 0;
     const sampleRadius = Math.round(Math.min(avgW, avgH) * 0.25);
 
@@ -588,8 +623,8 @@ export function verifyIsRealDocument(
         const b = data[idx + 2];
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-        // Paper pages are generally light/white background (luminance > 110)
-        if (lum > 105) paperPixelCount++;
+        // Paper pages are generally light/white background (luminance > 180 for strict paper detection, relaxed for old books)
+        if (lum > 180) whitePixelCount++;
 
         // Sample text gradient
         if (px < w - 4 && py < h - 4) {
@@ -603,11 +638,11 @@ export function verifyIsRealDocument(
     }
 
     const totalSamples = Math.pow(Math.floor((sampleRadius * 2) / 4) + 1, 2) || 1;
-    const paperPct = paperPixelCount / totalSamples;
+    const whiteRatio = whitePixelCount / totalSamples;
 
-    // A real document must have bright paper background (>30% light pixels) AND printed text/edge gradients (>4 text edges)
-    if (paperPct >= 0.30 && highGradientEdgeCount >= 4) {
-      return { isValidDoc: true, confidence: Math.min(0.98, paperPct + 0.3) };
+    // A real document must have bright paper background (>20% light pixels) AND printed text/edge gradients (>4 text edges)
+    if (whiteRatio >= 0.20 && highGradientEdgeCount >= 4) {
+      return { isValidDoc: true, confidence: Math.min(0.98, whiteRatio + 0.3) };
     }
   } catch (err) {
     console.warn('Document verification error:', err);
@@ -627,14 +662,18 @@ export function isDocumentOrTextPresent(canvas: HTMLCanvasElement): boolean {
     const data = imgData.data;
     let edgeCount = 0;
     const step = Math.max(4, Math.floor(data.length / 10000));
+    let totalSamples = 0;
     for (let i = 0; i < data.length - 16; i += step * 4) {
+      totalSamples++;
       const lum1 = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
       const lum2 = 0.299 * data[i + 16] + 0.587 * data[i + 17] + 0.114 * data[i + 18];
       if (Math.abs(lum1 - lum2) > 35) {
         edgeCount++;
       }
     }
-    return edgeCount > 10;
+    
+    const minEdges = Math.max(50, Math.floor(totalSamples * 0.05));
+    return edgeCount > minEdges;
   } catch {
     return true;
   }

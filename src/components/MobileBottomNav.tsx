@@ -278,7 +278,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       // Require consecutive valid frames to "lock on" so it takes time to correctly identify
       stableCountRef.current += 1;
 
-      if (stableCountRef.current >= 3) { // Requires ~900ms of seeing a document to show corners
+      if (stableCountRef.current >= 10) { // Requires ~1.5 seconds of seeing a document to lock on
         const w = 160;
         const h = 160;
         setDetectedQuad({
@@ -289,7 +289,7 @@ const ScannerSheet: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           bottomLeft: { x: Math.max(0.01, Math.min(0.99, rawCorners.bottomLeft.x / w)), y: Math.max(0.01, Math.min(0.99, rawCorners.bottomLeft.y / h)) }
         });
       }
-    }, 300);
+    }, 150);
 
     return () => clearInterval(intervalId);
   }, [step, scanMode]);
