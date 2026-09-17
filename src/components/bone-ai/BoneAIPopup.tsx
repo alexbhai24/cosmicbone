@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { History, MessageSquare, MoreVertical, Trash2, X } from 'lucide-react';
+import { History, MessageSquare, MoreVertical, Trash2, X, Printer } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { chatHistoryStore } from '../../services/chatHistoryStore';
 import type { ChatSession, ChatMessage } from '../../services/chatHistoryStore';
@@ -60,6 +60,83 @@ export const BoneAIPopup: React.FC<BoneAIPopupProps> = ({ isOpen, onClose }) => 
     setActiveSessionId(session.id);
     setMessages(session.messages);
     setView('chat');
+  };
+
+  const handlePrintChat = () => {
+    if (messages.length === 0) return;
+    
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    
+    let html = `
+      <html>
+        <head>
+          <title>Bone AI Transcript</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; padding: 30px; color: #1e293b; background: #fff; max-width: 800px; margin: 0 auto; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+            .msg { margin-bottom: 20px; padding: 15px; border-radius: 8px; page-break-inside: avoid; }
+            .user { background: #f8fafc; border-left: 4px solid #0284c7; }
+            .assistant { background: #ffffff; border: 1px solid #e2e8f0; }
+            .role { font-weight: 700; margin-bottom: 8px; color: #475569; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+            .content { white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+            h3 { font-size: 16px; margin: 15px 0 5px 0; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+            h4 { font-size: 15px; margin: 12px 0 4px 0; color: #334155; }
+            strong { color: #0f172a; }
+            ul { margin: 4px 0; padding-left: 20px; }
+            .math { font-family: "Times New Roman", Times, serif; font-style: italic; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; color: #334155; }
+            .math-block { display: block; text-align: center; margin: 10px 0; font-family: "Times New Roman", Times, serif; font-style: italic; font-size: 16px; }
+            .footer { margin-top: 40px; font-size: 12px; color: #94a3b8; text-align: center; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>CosmicBone - AI Conversation Transcript</h2>
+          </div>
+    `;
+    
+    messages.forEach(msg => {
+      let text = msg.content || '';
+      
+      // 1. Remove SVGs completely to avoid breaking PDF layout
+      text = text.replace(/<svg[\s\S]*?<\/svg>/gi, '[Visual Diagram Removed for Print]')
+                 .replace(/```mermaid[\s\S]*?```/g, '[Flowchart Removed for Print]');
+                 
+      // 2. Escape HTML to prevent code bleeding
+      text = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      
+      // 3. Parse Markdown to clean HTML for print
+      text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); // Bold
+      text = text.replace(/^### (.*$)/gim, '<h4>$1</h4>'); // H4
+      text = text.replace(/^## (.*$)/gim, '<h3>$1</h3>'); // H3
+      text = text.replace(/^\* (.*$)/gim, '<ul><li>$1</li></ul>'); // List asterisk
+      text = text.replace(/^- (.*$)/gim, '<ul><li>$1</li></ul>'); // List dash
+      
+      // Fix overlapping lists
+      text = text.replace(/<\/ul>\n<ul>/g, '\n');
+      
+      // 4. Parse LaTeX Math to clean CSS classes instead of raw symbols
+      text = text.replace(/\$\$(.*?)\$\$/g, '<span class="math-block">$1</span>'); // Display Math
+      text = text.replace(/\$(.*?)\$/g, '<span class="math">$1</span>'); // Inline Math
+                 
+      html += `
+        <div class="msg ${msg.role}">
+          <div class="role">${msg.role === 'user' ? 'You' : 'Bone AI'}</div>
+          <div class="content">${text}</div>
+        </div>
+      `;
+    });
+    
+    html += `<div class="footer">Generated on ${new Date().toLocaleString()}</div></body></html>`;
+    
+    printWindow.document.write(html);
+    printWindow.document.close();
+    
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+    }, 250);
   };
 
   const confirmDeleteSession = async (sessionId: string) => {
@@ -162,6 +239,16 @@ export const BoneAIPopup: React.FC<BoneAIPopupProps> = ({ isOpen, onClose }) => 
               >
                 <MessageSquare className="w-4 h-4" />
               </button>
+              {view === 'chat' && messages.length > 0 && (
+                <button 
+                  onClick={handlePrintChat} 
+                  className="p-1.5 text-gray-400 hover:text-[#00F0FF] rounded-lg hover:bg-white/5 transition-colors" 
+                  title="Print Conversation"
+                  aria-label="Print conversation"
+                >
+                  <Printer className="w-4 h-4" />
+                </button>
+              )}
               <button 
                 onClick={() => setIsMenuOpen(!isMenuOpen)} 
                 className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
@@ -213,6 +300,7 @@ export const BoneAIPopup: React.FC<BoneAIPopupProps> = ({ isOpen, onClose }) => 
                 currentRoute={currentRoute}
                 onNewChat={handleNewChat}
                 hideHeader={true}
+                isPopup={true}
               />
             ) : (
               <div className="h-full overflow-y-auto p-5 scrollbar-premium bg-[#040812]/95">

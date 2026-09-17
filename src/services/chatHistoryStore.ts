@@ -34,7 +34,7 @@ interface ChatDB extends DBSchema {
 }
 
 const DB_NAME = 'BoneAILocalDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase<ChatDB>> | null = null;
 

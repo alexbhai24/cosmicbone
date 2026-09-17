@@ -23,7 +23,8 @@ import {
   FileUp,
   Download,
   Maximize2,
-  Eye
+  Eye,
+  Headphones
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ChatMessage } from '../../services/chatHistoryStore';
@@ -31,6 +32,8 @@ import { aiService, shouldUseWebSearch } from '../../services/aiService';
 import { MermaidViewer } from './MermaidViewer';
 import { MessagePlusIcon } from './MessagePlusIcon';
 import { BixbyMicIcon } from './BixbyMicIcon';
+import { useApp } from '../../context/AppContext';
+import { BoneAIVoiceMode } from './BoneAIVoiceMode';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
@@ -42,6 +45,7 @@ interface BoneAIChatProps {
   onToggleSidebar?: () => void;
   onNewChat?: () => void;
   hideHeader?: boolean;
+  isPopup?: boolean;
 }
 
 const MODES = [
@@ -84,11 +88,20 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
   currentRoute,
   onToggleSidebar,
   onNewChat,
-  hideHeader = false
+  hideHeader = false,
+  isPopup = false
 }) => {
+  const { setIsBoneAIOpen, triggerPopupVoiceMode, setTriggerPopupVoiceMode } = useApp();
   const [inputText, setInputText] = useState('');
   const [mode, setMode] = useState('Level 1');
   const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>(getRandomPyqPrompts);
+
+  useEffect(() => {
+    if (isPopup && triggerPopupVoiceMode) {
+      setShowVoiceMode(true);
+      setTriggerPopupVoiceMode(false);
+    }
+  }, [isPopup, triggerPopupVoiceMode, setTriggerPopupVoiceMode]);
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -109,10 +122,12 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
   const [openSourcesMap, setOpenSourcesMap] = useState<Record<string, boolean>>({});
   const [isListening, setIsListening] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [showVoiceMode, setShowVoiceMode] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusState, setStatusState] = useState<'idle' | 'searching_web' | 'thinking' | 'completed' | 'cancelled' | 'error'>('idle');
   const [toolBoxOpen, setToolBoxOpen] = useState(false);
   const [fullViewSvg, setFullViewSvg] = useState<string | null>(null);
+  const [isProcessingSvg, setIsProcessingSvg] = useState<boolean>(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -122,19 +137,90 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const handleDownloadSvg = (svgContent: string, filename = 'bone_ai_illustration.svg') => {
+  const handleDownloadSvg = async (svgContent: string, filename = 'bone_ai_illustration.jpg') => {
     try {
-      const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
+      setIsProcessingSvg(true);
+      await new Promise(resolve => setTimeout(resolve, 100)); // allow UI to update
+
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(svgContent, 'image/svg+xml');
+      const svg = doc.querySelector('svg');
+      if (!svg) throw new Error('Invalid SVG');
+
+      let width = parseInt(svg.getAttribute('width') || '0', 10);
+      let height = parseInt(svg.getAttribute('height') || '0', 10);
+      
+      const viewBox = svg.getAttribute('viewBox');
+      if (viewBox && (!width || !height)) {
+        const parts = viewBox.split(/[ ,]+/);
+        width = parseFloat(parts[2]) || 800;
+        height = parseFloat(parts[3]) || 600;
+      }
+
+      if (!width) width = 800;
+      if (!height) height = 600;
+
+      // Expand boundaries slightly in case AI draws outside
+      const padding = 40;
+      svg.setAttribute('width', (width + padding * 2).toString());
+      svg.setAttribute('height', (height + padding * 2).toString());
+      
+      // Ensure viewBox covers the padded area
+      if (viewBox) {
+        const parts = viewBox.split(/[ ,]+/);
+        const vx = parseFloat(parts[0]) || 0;
+        const vy = parseFloat(parts[1]) || 0;
+        const vw = parseFloat(parts[2]) || width;
+        const vh = parseFloat(parts[3]) || height;
+        svg.setAttribute('viewBox', `${vx - padding} ${vy - padding} ${vw + padding * 2} ${vh + padding * 2}`);
+      } else {
+        svg.setAttribute('viewBox', `-${padding} -${padding} ${width + padding * 2} ${height + padding * 2}`);
+      }
+
+      const svgString = new XMLSerializer().serializeToString(svg);
+      const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const svgUrl = URL.createObjectURL(svgBlob);
+
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = svgUrl;
+      });
+
+      const scaleFactor = 20; // 20x resolution for massive ultra-HD quality
+      const canvas = document.createElement('canvas');
+      canvas.width = (width + padding * 2) * scaleFactor;
+      canvas.height = (height + padding * 2) * scaleFactor;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas context failed');
+
+      // Enable high-quality smoothing
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      // Scale context up for high-res drawing
+      ctx.scale(scaleFactor, scaleFactor);
+
+      ctx.fillStyle = '#091120';
+      ctx.fillRect(0, 0, width + padding * 2, height + padding * 2);
+      ctx.drawImage(img, 0, 0, width + padding * 2, height + padding * 2);
+
+      // Export as lossless PNG instead of lossy JPG
+      const dataUrl = canvas.toDataURL('image/png');
       const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
+      link.href = dataUrl;
+      link.download = filename.replace('.jpg', '.png');
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(svgUrl);
     } catch (err) {
       console.error('Failed to download SVG:', err);
+    } finally {
+      setIsProcessingSvg(false);
     }
   };
 
@@ -170,8 +256,14 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
 
     window.speechSynthesis.cancel();
 
-    // Sanitize message content from symbols or citation links before speaking
-    const sanitizedText = text.replace(/\[\d+\]/g, '').replace(/[*#`_-]/g, '').trim();
+    // Remove SVG blocks and markdown code blocks
+    let sanitizedText = text.replace(/<svg[\s\S]*?<\/svg>/gi, '')
+                            .replace(/```[\s\S]*?```/g, '');
+    
+    // Sanitize message content from markdown symbols and citation links for clean speech
+    sanitizedText = sanitizedText.replace(/\[\d+\]/g, '')
+                                 .replace(/[*#`_$\\]/g, '')
+                                 .trim();
 
     const utterance = new SpeechSynthesisUtterance(sanitizedText);
     const voices = window.speechSynthesis.getVoices();
@@ -279,7 +371,23 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
   };
 
   const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
+    // Strip raw SVG and code block diagrams so they don't get copied as massive XML text
+    let cleanText = text.replace(/<svg[\s\S]*?<\/svg>/gi, '[Visual Diagram removed]')
+                        .replace(/```mermaid[\s\S]*?```/g, '[Flowchart removed]');
+    
+    // Strip markdown formatting and LaTeX symbols for clean plain text copy
+    cleanText = cleanText.replace(/\*\*(.*?)\*\*/g, '$1') // Bold
+                         .replace(/^### (.*$)/gim, '$1')  // H4
+                         .replace(/^## (.*$)/gim, '$1')   // H3
+                         .replace(/^\* (.*$)/gim, '• $1') // List asterisk
+                         .replace(/^- (.*$)/gim, '• $1')  // List dash
+                         .replace(/\$\$(.*?)\$\$/g, '$1') // Display Math
+                         .replace(/\$(.*?)\$/g, '$1')     // Inline Math
+                         .replace(/```[\s\S]*?\n([\s\S]*?)```/g, '$1') // Code blocks
+                         .replace(/\[\d+\]/g, '')         // Citations
+                         .trim();
+                         
+    navigator.clipboard.writeText(cleanText);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
@@ -680,19 +788,49 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
         segments.push(<MermaidViewer key={`mermaid_${blockMatch.index}`} chart={code} />);
       } else if (lang === 'svg' || lang === 'xml' || (code.includes('<svg') && code.includes('</svg>'))) {
         const svgMatch = code.match(/<svg[\s\S]*?<\/svg>/i);
-        const svgCode = svgMatch ? svgMatch[0] : code;
+        let svgCode = svgMatch ? svgMatch[0] : code;
+
+        // Auto-fix SVG responsiveness without breaking AI coordinate bounds
+        svgCode = svgCode.replace(/<svg([^>]*)>/i, (match, attrs) => {
+          let w = 800; let h = 600; let minX = 0; let minY = 0;
+          
+          const viewBoxMatch = attrs.match(/viewBox=["']([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)["']/i);
+          if (viewBoxMatch) {
+            minX = Number(viewBoxMatch[1]);
+            minY = Number(viewBoxMatch[2]);
+            w = Number(viewBoxMatch[3]);
+            h = Number(viewBoxMatch[4]);
+          } else {
+            const widthMatch = attrs.match(/width=["'](\d+)(px)?["']/i);
+            const heightMatch = attrs.match(/height=["'](\d+)(px)?["']/i);
+            if (widthMatch) w = Number(widthMatch[1]);
+            if (heightMatch) h = Number(heightMatch[1]);
+          }
+
+          // Use exact bounds, rely on CSS padding/scaling to prevent clipping of overflowing elements
+          let newAttrs = attrs.replace(/\b(width|height|viewBox)=["'][^"']*["']/gi, '');
+          newAttrs += ` viewBox="${minX} ${minY} ${w} ${h}"`;
+          
+          return `<svg width="100%" height="100%" preserveAspectRatio="xMidYMid meet" ${newAttrs}>`;
+        });
 
         segments.push(
           <div key={`svg_${blockMatch.index}`} className="relative my-3 inline-block max-w-full sm:max-w-md rounded-3xl overflow-hidden border border-white/10 bg-[#070d18] shadow-2xl group transition-all">
             {/* Clean SVG Image Container (Cropped without extra top padding) */}
             <div 
-              className="p-4 sm:p-5 flex justify-center items-center bg-black/60 cursor-pointer overflow-hidden max-h-[380px]"
+              className="p-4 sm:p-5 flex justify-center items-center bg-black/60 cursor-pointer overflow-hidden max-h-[450px] relative"
               onClick={() => setFullViewSvg(svgCode)}
             >
               <div 
-                className="max-w-full max-h-full flex justify-center items-center select-none pointer-events-none"
+                className="w-[85%] my-6 flex justify-center items-center select-none pointer-events-none [&_svg]:max-w-full [&_svg]:h-auto [&_svg]:overflow-visible"
                 dangerouslySetInnerHTML={{ __html: svgCode }}
               />
+              {isProcessingSvg && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/50 backdrop-blur-md rounded-3xl">
+                  <RefreshCw className="w-8 h-8 text-[#00F0FF] animate-spin mb-3" />
+                  <span className="text-[#00F0FF] font-semibold tracking-widest text-sm animate-pulse">PROCESSING...</span>
+                </div>
+              )}
             </div>
 
             {/* Overlaid Floating Action Icons (Bottom-Left: See Full, Bottom-Right: Download) */}
@@ -748,7 +886,7 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-transparent">
+    <div className="flex flex-col h-full bg-transparent select-text">
       {/* Bone AI Header matching user Image 2 */}
       {!hideHeader && (
         <div className="flex items-center justify-between px-4 sm:px-8 pt-4 sm:pt-8 pb-2 shrink-0">
@@ -878,6 +1016,7 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
                           <div className="flex items-center space-x-1.5">
                             {/* Feedback Thumbs */}
                             <button
+                              type="button"
                               onClick={() => setFeedback(prev => ({ ...prev, [msg.id]: 'up' }))}
                               className={`p-1.5 rounded-lg transition-colors ${feedback[msg.id] === 'up' ? 'text-[#00F0FF] bg-[#00F0FF]/10' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                               title="Helpful"
@@ -885,6 +1024,7 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
                               <ThumbsUp className="w-3.5 h-3.5" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => setFeedback(prev => ({ ...prev, [msg.id]: 'down' }))}
                               className={`p-1.5 rounded-lg transition-colors ${feedback[msg.id] === 'down' ? 'text-red-400 bg-red-500/10' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                               title="Not helpful"
@@ -893,6 +1033,7 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
                             </button>
                             {/* Copy */}
                             <button
+                              type="button"
                               onClick={() => handleCopy(msg.content, msg.id)}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
                               title="Copy text"
@@ -901,6 +1042,7 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
                             </button>
                             {/* Text-to-speech */}
                             <button
+                              type="button"
                               onClick={() => toggleSpeech(msg.content, msg.id)}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
                               title={speakingId === msg.id ? "Stop reading" : "Read aloud"}
@@ -1015,7 +1157,7 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
               role="alert"
             >
               <span>{speechError}</span>
-              <button onClick={() => setSpeechError(null)} className="text-red-400 hover:text-white ml-2">
+              <button type="button" onClick={() => setSpeechError(null)} className="text-red-400 hover:text-white ml-2">
                 <X className="w-3 h-3" />
               </button>
             </motion.div>
@@ -1045,6 +1187,7 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setAttachment(null)}
                 className="p-1 text-gray-400 hover:text-red-400 rounded-lg transition-colors"
               >
@@ -1113,174 +1256,216 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
           )}
         </AnimatePresence>
 
-        {/* Input Capsule with Interaction Glows */}
-        <div
-          className={`relative transition-all rounded-[22px] p-3 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.3)] ${isListening
-            ? 'bg-[var(--bg-surface-secondary)]/80 border bone-ai-listening-glow'
-            : isGenerating
-              ? 'bg-[var(--bg-surface-secondary)]/80 border bone-ai-thinking-ring'
-              : 'bg-[var(--bg-surface-secondary)]/70 border border-white/15 focus-within:border-[var(--color-cyan)]/50 focus-within:shadow-[0_0_20px_rgba(0,240,255,0.15)]'
-            }`}
-        >
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept="image/jpeg, image/png, image/webp, application/pdf"
-            className="hidden"
+        {/* Input Capsule or Voice Mode Inline Capsule */}
+        {showVoiceMode ? (
+          <BoneAIVoiceMode
+            isOpen={showVoiceMode}
+            onClose={() => setShowVoiceMode(false)}
+            mode={mode}
           />
+        ) : (
+          <div
+            className={`relative transition-all rounded-[22px] p-3 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.3)] ${isListening
+              ? 'bg-[var(--bg-surface-secondary)]/80 border bone-ai-listening-glow'
+              : isGenerating
+                ? 'bg-[var(--bg-surface-secondary)]/80 border bone-ai-thinking-ring'
+                : 'bg-[var(--bg-surface-secondary)]/70 border border-white/15 focus-within:border-[var(--color-cyan)]/50 focus-within:shadow-[0_0_20px_rgba(0,240,255,0.15)]'
+              }`}
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept="image/jpeg, image/png, image/webp, application/pdf"
+              className="hidden"
+            />
 
-          {/* Textarea */}
-          <textarea
-            ref={textareaRef}
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
+            {/* Textarea */}
+            <textarea
+              ref={textareaRef}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              onPaste={(e) => {
+                const items = e.clipboardData?.items;
+                if (items) {
+                  for (let i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('image') !== -1) {
+                      const blob = items[i].getAsFile();
+                      if (blob) {
+                        const file = new File([blob], 'pasted-image.png', { type: blob.type });
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          if (event.target?.result) {
+                            setAttachment({ file, base64: event.target.result as string, type: 'image' });
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                        e.preventDefault();
+                        break;
+                      }
+                    }
+                  }
+                }
+              }}
+              placeholder={
+                isListening
+                  ? 'Listening…'
+                  : statusState === 'searching_web'
+                    ? 'Searching the web…'
+                    : isGenerating
+                      ? 'Thinking…'
+                      : 'Message Bone AI or ask a question...'
               }
-            }}
-            placeholder={
-              isListening
-                ? 'Listening…'
-                : statusState === 'searching_web'
-                  ? 'Searching the web…'
-                  : isGenerating
-                    ? 'Thinking…'
-                    : 'Message Bone AI or ask a question...'
-            }
-            className="w-full bg-transparent border-0 text-white text-[13px] placeholder:text-gray-500 focus:outline-none resize-none min-h-[36px] max-h-28 px-0 leading-relaxed"
-            rows={1}
-          />
+              className="w-full bg-transparent border-0 text-white text-[13px] placeholder:text-gray-500 focus:outline-none resize-none min-h-[36px] max-h-28 px-0 leading-relaxed"
+              rows={1}
+            />
 
-          {/* Action Bar */}
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/[0.06]">
-            {/* Left: Toolbox (+) and Mode (De-emphasized during listening) */}
-            <div className={`flex items-center space-x-1.5 transition-opacity ${isListening ? 'opacity-40 pointer-events-none' : ''}`}>
-              <div className="relative" ref={toolBoxRef}>
+            {/* Action Bar */}
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/[0.06]">
+              {/* Left: Toolbox (+) and Mode (De-emphasized during listening) */}
+              <div className={`flex items-center space-x-1.5 transition-opacity ${isListening ? 'opacity-40 pointer-events-none' : ''}`}>
+                <div className="relative" ref={toolBoxRef}>
+                  <button
+                    type="button"
+                    onClick={() => setToolBoxOpen(!toolBoxOpen)}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all border focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF] ${
+                      toolBoxOpen
+                        ? 'bg-[#00F0FF]/20 text-[#00F0FF] border-[#00F0FF]/50 shadow-[0_0_12px_rgba(0,240,255,0.3)]'
+                        : 'text-gray-400 hover:text-white hover:bg-white/[0.08] border-white/[0.08]'
+                    }`}
+                    title="Toolbox: Attach file or web link"
+                    aria-label="Toolbox"
+                  >
+                    <Plus className={`w-3.5 h-3.5 transition-transform duration-200 ${toolBoxOpen ? 'rotate-45' : ''}`} />
+                  </button>
+
+                  {/* Toolbox Popup Menu */}
+                  <AnimatePresence>
+                    {toolBoxOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: -6, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute bottom-full left-0 mb-2 w-48 bg-[#121624] border border-white/10 rounded-2xl p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.6)] backdrop-blur-xl z-50 flex flex-col gap-1"
+                      >
+                        <div className="px-2.5 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          Toolbox
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setToolBoxOpen(false);
+                            fileInputRef.current?.click();
+                          }}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left text-xs text-gray-200 hover:text-white hover:bg-white/[0.08] transition-colors"
+                        >
+                          <FileUp className="w-4 h-4 text-[#00F0FF]" />
+                          <span>Upload File / PDF</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setToolBoxOpen(false);
+                            setShowLinkInput(true);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left text-xs text-gray-200 hover:text-white hover:bg-white/[0.08] transition-colors"
+                        >
+                          <Link2 className="w-4 h-4 text-emerald-400" />
+                          <span>Insert Web Link</span>
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Think Toggle Button */}
                 <button
                   type="button"
-                  onClick={() => setToolBoxOpen(!toolBoxOpen)}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all border focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF] ${
-                    toolBoxOpen
-                      ? 'bg-[#00F0FF]/20 text-[#00F0FF] border-[#00F0FF]/50 shadow-[0_0_12px_rgba(0,240,255,0.3)]'
-                      : 'text-gray-400 hover:text-white hover:bg-white/[0.08] border-white/[0.08]'
-                  }`}
-                  title="Toolbox: Attach file or web link"
-                  aria-label="Toolbox"
+                  onClick={cycleMode}
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium transition-all border ${MODES.find(m => m.name === mode)?.bg || 'bg-white/[0.06]'
+                    } ${MODES.find(m => m.name === mode)?.color || 'text-gray-300'
+                    } ${MODES.find(m => m.name === mode)?.border || 'border-white/[0.08]'
+                    } focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF]`}
+                  title={`Current Mode: ${mode} - ${MODES.find(m => m.name === mode)?.desc} (Click to change)`}
                 >
-                  <Plus className={`w-3.5 h-3.5 transition-transform duration-200 ${toolBoxOpen ? 'rotate-45' : ''}`} />
+                  <Brain className="w-3.5 h-3.5" />
+                  <span>Think</span>
                 </button>
-
-                {/* Toolbox Popup Menu */}
-                <AnimatePresence>
-                  {toolBoxOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                      animate={{ opacity: 1, y: -6, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute bottom-full left-0 mb-2 w-48 bg-[#121624] border border-white/10 rounded-2xl p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.6)] backdrop-blur-xl z-50 flex flex-col gap-1"
-                    >
-                      <div className="px-2.5 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                        Toolbox
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setToolBoxOpen(false);
-                          fileInputRef.current?.click();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left text-xs text-gray-200 hover:text-white hover:bg-white/[0.08] transition-colors"
-                      >
-                        <FileUp className="w-4 h-4 text-[#00F0FF]" />
-                        <span>Upload File / PDF</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setToolBoxOpen(false);
-                          setShowLinkInput(true);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left text-xs text-gray-200 hover:text-white hover:bg-white/[0.08] transition-colors"
-                      >
-                        <Link2 className="w-4 h-4 text-emerald-400" />
-                        <span>Insert Web Link</span>
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
 
-              {/* Think Toggle Button */}
-              <button
-                type="button"
-                onClick={cycleMode}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium transition-all border ${MODES.find(m => m.name === mode)?.bg || 'bg-white/[0.06]'
-                  } ${MODES.find(m => m.name === mode)?.color || 'text-gray-300'
-                  } ${MODES.find(m => m.name === mode)?.border || 'border-white/[0.08]'
-                  } focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF]`}
-                title={`Current Mode: ${mode} - ${MODES.find(m => m.name === mode)?.desc} (Click to change)`}
-              >
-                <Brain className="w-3.5 h-3.5" />
-                <span>Think</span>
-              </button>
-            </div>
+              {/* Right: Voice Equalizer / Cancel Stop / Send */}
+              <div className="flex items-center space-x-1.5">
+                {isListening ? (
+                  /* Listening Equalizer Bar Icon */
+                  <button
+                    type="button"
+                    onClick={toggleVoiceInput}
+                    className="w-8 h-8 rounded-full bg-[#00F0FF]/15 border border-[#00F0FF]/40 text-[#00F0FF] flex items-center justify-center space-x-[2px] transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF]"
+                    title="Listening… click to stop"
+                    aria-label="Stop listening"
+                  >
+                    <div className="w-0.5 bg-[#00F0FF] rounded-full bone-ai-eq-bar-1" />
+                    <div className="w-0.5 bg-[#00F0FF] rounded-full bone-ai-eq-bar-2" />
+                    <div className="w-0.5 bg-[#00F0FF] rounded-full bone-ai-eq-bar-3" />
+                    <div className="w-0.5 bg-[#00F0FF] rounded-full bone-ai-eq-bar-4" />
+                  </button>
+                ) : isGenerating ? (
+                  /* Thinking Square Cancel / Stop Button */
+                  <button
+                    type="button"
+                    onClick={handleCancel}
+                    className="w-8 h-8 rounded-full bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-white border border-red-500/40 flex items-center justify-center transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                    title="Cancel processing"
+                    aria-label="Cancel processing"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                ) : (
+                  /* Bixby Microphone Icon */
+                  <button
+                    type="button"
+                    onClick={toggleVoiceInput}
+                    className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.05] hover:bg-white/[0.12] border border-white/[0.08] hover:border-white/20 transition-all hover:scale-105 active:scale-95 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF]"
+                    title="Start voice search"
+                    aria-label="Start voice search"
+                  >
+                    <BixbyMicIcon className="w-5 h-5" size={20} />
+                  </button>
+                )}
 
-            {/* Right: Voice Equalizer / Cancel Stop / Send */}
-            <div className="flex items-center space-x-1.5">
-              {isListening ? (
-                /* Listening Equalizer Bar Icon */
-                <button
-                  type="button"
-                  onClick={toggleVoiceInput}
-                  className="w-8 h-8 rounded-full bg-[#00F0FF]/15 border border-[#00F0FF]/40 text-[#00F0FF] flex items-center justify-center space-x-[2px] transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF]"
-                  title="Listening… click to stop"
-                  aria-label="Stop listening"
-                >
-                  <div className="w-0.5 bg-[#00F0FF] rounded-full bone-ai-eq-bar-1" />
-                  <div className="w-0.5 bg-[#00F0FF] rounded-full bone-ai-eq-bar-2" />
-                  <div className="w-0.5 bg-[#00F0FF] rounded-full bone-ai-eq-bar-3" />
-                  <div className="w-0.5 bg-[#00F0FF] rounded-full bone-ai-eq-bar-4" />
-                </button>
-              ) : isGenerating ? (
-                /* Thinking Square Cancel / Stop Button */
-                <button
-                  type="button"
-                  onClick={handleCancel}
-                  className="w-8 h-8 rounded-full bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-white border border-red-500/40 flex items-center justify-center transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
-                  title="Cancel processing"
-                  aria-label="Cancel processing"
-                >
-                  <Square className="w-3.5 h-3.5 fill-current" />
-                </button>
-              ) : (
-                /* Bixby Microphone Icon */
-                <button
-                  type="button"
-                  onClick={toggleVoiceInput}
-                  className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.05] hover:bg-white/[0.12] border border-white/[0.08] hover:border-white/20 transition-all hover:scale-105 active:scale-95 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF]"
-                  title="Start voice search"
-                  aria-label="Start voice search"
-                >
-                  <BixbyMicIcon className="w-5 h-5" size={20} />
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => handleSend()}
-                disabled={isGenerating || (!inputText.trim() && !attachment)}
-                className="w-8 h-8 rounded-full bg-[#00D4E8] hover:bg-[#00F0FF] text-[#0a0c14] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-[0_2px_12px_rgba(0,240,255,0.3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF]"
-                title="Send"
-                aria-label="Send message"
-              >
-                {isGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-              </button>
+                {mode === 'Level 1' && !inputText.trim() && !attachment && !isGenerating ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowVoiceMode(true)}
+                    className="w-8 h-8 rounded-full bg-white hover:bg-gray-100 text-[#0a0c14] flex items-center justify-center transition-all shadow-[0_0_15px_rgba(255,255,255,0.4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                    title="Advanced Voice Mode"
+                    aria-label="Advanced Voice Mode"
+                  >
+                    <Headphones className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSend()}
+                    disabled={isGenerating || (!inputText.trim() && !attachment)}
+                    className="w-8 h-8 rounded-full bg-[#00D4E8] hover:bg-[#00F0FF] text-[#0a0c14] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-[0_2px_12px_rgba(0,240,255,0.3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F0FF]"
+                    title="Send"
+                    aria-label="Send message"
+                  >
+                    {isGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* SVG Image Full Screen Lightbox Modal */}
@@ -1308,20 +1493,27 @@ export const BoneAIChat: React.FC<BoneAIChatProps> = ({
               >
                 <X className="w-5 h-5" />
               </button>
-              <div className="w-full flex justify-center items-center p-2 sm:p-6 overflow-auto">
+              <div className="w-full flex justify-center items-center p-2 sm:p-6 overflow-auto relative">
                 <div 
-                  className="max-w-full flex justify-center items-center"
+                  className="w-[90%] h-[60vh] flex justify-center items-center [&_svg]:w-full [&_svg]:h-full [&_svg]:overflow-visible"
                   dangerouslySetInnerHTML={{ __html: fullViewSvg }}
                 />
+                {isProcessingSvg && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/50 backdrop-blur-md rounded-xl">
+                    <RefreshCw className="w-10 h-10 text-[#00F0FF] animate-spin mb-4" />
+                    <span className="text-[#00F0FF] font-bold tracking-widest text-lg animate-pulse">PROCESSING...</span>
+                  </div>
+                )}
               </div>
               <div className="mt-6 flex items-center justify-center space-x-4 shrink-0">
                 <button
                   type="button"
                   onClick={() => handleDownloadSvg(fullViewSvg)}
-                  className="px-5 py-2.5 bg-[#00F0FF] hover:bg-[#00F0FF]/80 text-black font-bold text-xs rounded-xl flex items-center space-x-2 transition-colors shadow-lg"
+                  disabled={isProcessingSvg}
+                  className="px-5 py-2.5 bg-[#00F0FF] hover:bg-[#00F0FF]/80 text-black font-bold text-xs rounded-xl flex items-center space-x-2 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Download SVG Image</span>
+                  <span>{isProcessingSvg ? 'Processing...' : 'Download HD Image'}</span>
                 </button>
                 <button
                   type="button"

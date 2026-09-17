@@ -85,6 +85,11 @@ export function shouldUseWebSearch(msg: string, mode: string): boolean {
     return true;
   }
 
+  // Image/Photo requests
+  if (lower.includes('picture of') || lower.includes('image of') || lower.includes('photo of') || lower.includes('show me a picture')) {
+    return true;
+  }
+
   // Dynamic real-time topics, dates, release dates, current prices, news
   const dynamicKeywords = [
     'gta 6', 'gta vi', 'release date', 'price', 'today', 'latest', 'recent news', 
@@ -108,7 +113,9 @@ export function shouldUseWebSearch(msg: string, mode: string): boolean {
 function getSystemPromptForMode(mode: string, userMessage: string = ''): string {
   const base = `You are Bone AI, an expert, highly encouraging EdTech AI tutor on the CosmicBone platform, specializing in STEM, JEE, NEET, and Board Exams.
 
-GUIDELINES FOR EXCELLENCE:
+CRITICAL RULE: If the user simply says hello, greets you, or asks a casual conversational question (e.g. "how are you?"), respond naturally, warmly, and conversationally in 1-2 sentences. DO NOT apply the academic guidelines below or force STEM terminology onto casual conversation.
+
+GUIDELINES FOR EXCELLENCE (Apply only to academic/study questions):
 1. Format your response cleanly using Markdown headings, bold key terms inline (**term**), bullet points, and numbered lists.
 2. For mathematical calculations, integrals, or physics equations, ALWAYS wrap math inside LaTeX blocks using $$ ... $$ for display math or $ ... $ for inline math.
 3. For Chemistry reactions, ALWAYS format equations using LaTeX math arrows like:
@@ -122,7 +129,7 @@ $$ 2\\text{R-X} + 2\\text{Na} \\xrightarrow{\\text{dry ether}} \\text{R-R} + 2\\
 
   switch (mode) {
     case 'Level 1':
-      return `${base}\n\nMODE: Level 1 (Search Summarizer)\n- Give a fast, direct, and concise answer (2-3 sentences max).`;
+      return `${base}\n\nMODE: Level 1 (Search Summarizer)\n- Give a fast, direct, and concise answer (2-3 sentences max).\n- DO NOT generate SVGs. Never generate diagrams. If the user asks for an image, they want you to search the web for it.`;
 
     case 'Level 2':
       return `${base}\n\nMODE: Level 2 (Standard Detail)\n- Provide a clear, medium-length response with key sections.`;
@@ -131,7 +138,7 @@ $$ 2\\text{R-X} + 2\\text{Na} \\xrightarrow{\\text{dry ether}} \\text{R-R} + 2\\
       return `${base}\n\nMODE: Level 3 (Deep Explanations)\n- Act as an expert private tutor. Explain concepts deeply, highlight common pitfalls/mistakes, and provide step-by-step methods.`;
 
     case 'Level 4':
-      return `${base}\n\nMODE: Level 4 (Advanced Solving & Visuals)\n- Analyze the problem with rigorous logic, precision, and step-by-step derivation.`;
+      return `${base}\n\nMODE: Level 4 (Mastery & Cheat Sheets)\n- Act like a strict, top-tier examiner. Use heavy academic terminology and complex multi-step derivations.\n- When asked for a diagram, flowchart, or cheat sheet, you MUST generate a massive, highly-detailed, full-page Infographic cheat sheet using an SVG vector enclosed in \`\`\`xml <svg ...> </svg> \`\`\`. \n- SVG Instructions: Use dark, premium background colors (e.g. #0f172a). Use beautiful typography, glowing neon borders (#00F0FF, #FF3366, #FFD700), detailed text bullet points, and highly organized grid layouts. Make it look exactly like a premium, professional NEET/JEE revision poster.`;
 
     default:
       return base;
@@ -283,15 +290,36 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
-// ─── Gemini Direct API ────────────────────────────────────────────────────────
-async function callGemini(apiKey: string, params: AIServiceParams): Promise<string> {
+// Helper to construct key pool from single key or comma-separated list
+export function getApiKeyPool(singleKey?: string, poolKeys?: string): string[] {
+  const keys: string[] = [];
+  if (poolKeys) {
+    poolKeys.split(',').forEach(k => {
+      const trimmed = k.trim();
+      if (trimmed && trimmed.length > 8 && !trimmed.startsWith('YOUR_') && !trimmed.startsWith('PLACEHOLDER')) {
+        keys.push(trimmed);
+      }
+    });
+  }
+  if (singleKey) {
+    const trimmed = singleKey.trim();
+    if (trimmed && trimmed.length > 8 && !trimmed.startsWith('YOUR_') && !trimmed.startsWith('PLACEHOLDER') && !keys.includes(trimmed)) {
+      keys.push(trimmed);
+    }
+  }
+  return keys;
+}
+
+// ─── Gemini Direct API with Multi-Key Failover Pool ───────────────────────────
+async function callGemini(apiKeys: string[], params: AIServiceParams, overrideModels?: string[]): Promise<string> {
   const configuredModel = (import.meta as any).env?.VITE_BONE_AI_MODEL;
   const candidateModels = Array.from(new Set([
+    ...(overrideModels || []),
     configuredModel,
     'gemini-3.6-flash',
     'gemini-3.5-flash',
-    'gemini-flash-lite-latest',
-    'gemini-pro-latest'
+    'gemini-3.8-flash',
+    'gemini-3.1-flash-lite'
   ].filter(Boolean)));
 
   const systemPrompt = getSystemPromptForMode(params.mode, params.message);
@@ -318,49 +346,60 @@ async function callGemini(apiKey: string, params: AIServiceParams): Promise<stri
     }
   }
 
-  const body: any = { contents: [{ parts }] };
+  const body: any = { 
+    contents: [{ parts }]
+  };
   let lastError: Error | null = null;
 
-  for (const model of candidateModels) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const res = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey
-        },
-        body: JSON.stringify(body),
-        signal: params.signal
-      }, 15000);
+  for (const apiKey of apiKeys) {
+    for (const model of candidateModels) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const res = await fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey
+          },
+          body: JSON.stringify(body),
+          signal: params.signal
+        }, 45000);
 
-      if (!res.ok) {
-        const errObj = await res.json().catch(() => ({}));
-        const errMsg = errObj.error?.message || `Gemini API error ${res.status}`;
-        lastError = new Error(errMsg);
-        if (res.status === 404 || res.status === 410 || res.status === 503) {
-          console.warn(`[aiService] Gemini model ${model} returned ${res.status} (${errMsg}), trying next fallback model...`);
-          continue;
+        if (!res.ok) {
+          const errObj = await res.json().catch(() => ({}));
+          const errMsg = errObj.error?.message || `Gemini API error ${res.status}`;
+          lastError = new Error(errMsg);
+
+          if (res.status === 429 || res.status === 403 || res.status === 400) {
+            console.warn(`[aiService] Gemini Key (${apiKey.substring(0, 6)}...) returned ${res.status} (${errMsg}). Trying fallback models...`);
+            continue; // Try next fallback model on this key before giving up
+          }
+
+          if (res.status === 404 || res.status === 410 || res.status === 503) {
+            console.warn(`[aiService] Gemini model ${model} returned ${res.status} (${errMsg}), trying next fallback model...`);
+            continue;
+          }
+          throw lastError;
         }
-        throw lastError;
-      }
 
-      const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error('Gemini returned empty response');
-      return text;
-    } catch (err: any) {
-      lastError = err;
-      if (err.name === 'AbortError') throw err;
-      console.warn(`[aiService] Gemini model ${model} failed:`, err.message);
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error('Gemini returned empty response');
+        return text;
+      } catch (err: any) {
+        lastError = err;
+        if (err.name === 'AbortError') throw err;
+        console.warn(`[aiService] Gemini key/model attempt failed:`, err.message);
+        (window as any).lastGeminiError = err.message;
+      }
     }
   }
 
-  throw lastError || new Error('All Gemini candidate models failed');
+  throw lastError || new Error('All Gemini candidate keys and models failed');
 }
 
-// ─── NVIDIA NIM API ───────────────────────────────────────────────────────────
-async function callNvidia(apiKey: string, params: AIServiceParams, customSystemPrompt?: string): Promise<string> {
+// ─── NVIDIA NIM API with Multi-Key Failover Pool ──────────────────────────────
+async function callNvidia(apiKeys: string[], params: AIServiceParams, customSystemPrompt?: string): Promise<{ text: string }> {
   const configuredModel = (import.meta as any).env?.VITE_NVIDIA_MODEL;
   const candidateModels = Array.from(new Set([
     configuredModel,
@@ -390,48 +429,56 @@ async function callNvidia(apiKey: string, params: AIServiceParams, customSystemP
 
   let lastError: Error | null = null;
 
-  for (const model of candidateModels) {
-    try {
-      const payload = {
-        model,
-        messages: messagesPayload,
-        max_tokens: 1500,
-        temperature: 0.7,
-      };
+  for (const apiKey of apiKeys) {
+    for (const model of candidateModels) {
+      try {
+        const payload = {
+          model,
+          messages: messagesPayload,
+          max_tokens: 1500,
+          temperature: 0.7,
+        };
 
-      const res = await fetchWithTimeout('https://integrate.api.nvidia.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(payload),
-        signal: params.signal
-      }, 12000);
+        const res = await fetchWithTimeout('https://integrate.api.nvidia.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
+          signal: params.signal
+        }, 12000);
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg = err.error?.message || err.detail || `NVIDIA error ${res.status}`;
-        lastError = new Error(msg);
-        if (res.status === 404 || res.status === 410 || res.status === 503) {
-          console.warn(`[aiService] NVIDIA model ${model} failed (${msg}), trying next model...`);
-          continue;
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          const msg = err.error?.message || err.detail || `NVIDIA error ${res.status}`;
+          lastError = new Error(msg);
+
+          if (res.status === 429 || res.status === 403 || res.status === 400) {
+            console.warn(`[aiService] NVIDIA Key (${apiKey.substring(0, 6)}...) returned ${res.status} (${msg}), rotating to next key in pool...`);
+            break;
+          }
+
+          if (res.status === 404 || res.status === 410 || res.status === 503) {
+            console.warn(`[aiService] NVIDIA model ${model} failed (${msg}), trying next model...`);
+            continue;
+          }
+          throw lastError;
         }
-        throw lastError;
-      }
 
-      const data = await res.json();
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new Error('NVIDIA returned empty response');
-      return content;
-    } catch (err: any) {
-      lastError = err;
-      if (err.name === 'AbortError') throw err;
-      console.warn(`[aiService] NVIDIA model ${model} failed:`, err.message);
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) throw new Error('NVIDIA returned empty response');
+        return content;
+      } catch (err: any) {
+        lastError = err;
+        if (err.name === 'AbortError') throw err;
+        console.warn(`[aiService] NVIDIA key/model attempt failed:`, err.message);
+      }
     }
   }
 
-  throw lastError || new Error('All NVIDIA candidate models failed');
+  throw lastError || new Error('All NVIDIA candidate keys and models failed');
 }
 
 // ─── HTML Entity Decoder ──────────────────────────────────────────────────────
@@ -552,20 +599,52 @@ function parseFollowUps(rawText: string): { cleanText: string; suggestions: stri
   return { cleanText, suggestions: suggestions.slice(0, 3) };
 }
 
+// ─── In-Memory Ultra-Fast Response Cache ──────────────────────────────────────
+const responseCache = new Map<string, AIResponse>();
+
 // ─── Main AI Dispatcher ───────────────────────────────────────────────────────
 export const aiService = {
   async sendMessage(params: AIServiceParams): Promise<AIResponse> {
     const env = (import.meta as any).env ?? {};
-    const geminiKey: string | undefined = env.VITE_GEMINI_API_KEY;
-    const nvidiaKey: string | undefined = env.VITE_NVIDIA_API_KEY;
+
+    // 0. Cache lookup for instant (<50ms) zero-quota responses
+    const cacheKey = `${params.mode}:${params.message.toLowerCase().trim()}`;
+    if (responseCache.has(cacheKey) && !params.attachment) {
+      return responseCache.get(cacheKey)!;
+    }
+
+    let levelKeys: string[] = [];
+    let levelModels: string[] = [];
+
+    if (params.mode === 'Level 1') {
+      levelKeys = getApiKeyPool(env.VITE_LEVEL1_API_KEY, env.VITE_GEMINI_API_KEY);
+      levelModels = ['gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.6-flash'];
+    } else if (params.mode === 'Level 2') {
+      levelKeys = getApiKeyPool(env.VITE_LEVEL2_API_KEY, env.VITE_GEMINI_API_KEY);
+      levelModels = ['gemini-3.6-flash', 'gemini-3.5-flash'];
+    } else if (params.mode === 'Level 3') {
+      levelKeys = getApiKeyPool(env.VITE_LEVEL3_API_KEY, env.VITE_GEMINI_API_KEY);
+      levelModels = ['gemini-3.6-flash', 'gemini-3.8-flash'];
+    } else if (params.mode === 'Level 4') {
+      levelKeys = getApiKeyPool(env.VITE_LEVEL4_API_KEY, env.VITE_GEMINI_API_KEY);
+      levelModels = ['gemini-3.6-flash', 'gemini-3.8-flash'];
+    }
+
+    const geminiKeys = Array.from(new Set([
+      ...levelKeys,
+      ...getApiKeyPool(env.VITE_GEMINI_API_KEY, env.VITE_GEMINI_API_KEYS)
+    ]));
+    const nvidiaKeys = getApiKeyPool(env.VITE_NVIDIA_API_KEY, env.VITE_NVIDIA_API_KEYS);
 
     // Fast path 1: Pure mathematical / arithmetic calculations
     const mathResult = evaluateMath(params.message);
     if (mathResult && !params.attachment) {
-      return { 
+      const resPayload: AIResponse = { 
         answer: mathResult.answer,
         followUpSuggestions: mathResult.suggestions 
       };
+      responseCache.set(cacheKey, resPayload);
+      return resPayload;
     }
 
     const needsWeb = shouldUseWebSearch(params.message, params.mode);
@@ -599,53 +678,53 @@ export const aiService = {
 
     let aiAnswer = '';
 
-    // Priority 1: Gemini Direct API (If valid API key is set in .env)
-    if (isValidKey(geminiKey)) {
+    // Priority 1: Gemini Direct API (with dedicated level key & fallback pool)
+    if (geminiKeys.length > 0) {
       try {
-        aiAnswer = await callGemini(geminiKey!, params);
+        aiAnswer = await callGemini(geminiKeys, params, levelModels);
       } catch (err: any) {
-        console.warn('[aiService] Gemini API call failed:', err.message);
+        console.warn('[aiService] Gemini API key pool failed:', err.message);
       }
     }
 
-    // Priority 2: NVIDIA NIM API (If configured)
-    if (!aiAnswer && isValidKey(nvidiaKey)) {
+    // Priority 2: NVIDIA NIM API (with multi-key failover pool)
+    if (!aiAnswer && nvidiaKeys.length > 0) {
       try {
-        aiAnswer = await callNvidia(nvidiaKey!, params);
+        const nvidiaRes = await callNvidia(nvidiaKeys, params);
+        aiAnswer = nvidiaRes.text;
       } catch (err: any) {
-        console.warn('[aiService] NVIDIA NIM call failed:', err.message);
+        console.warn('[aiService] NVIDIA NIM key pool failed:', err.message);
       }
     }
 
     // High Quality Cloud AI Output
     if (aiAnswer) {
       const parsed = parseFollowUps(aiAnswer);
-      return { 
+      const resPayload: AIResponse = { 
         answer: parsed.cleanText, 
         citations, 
         webImages: webData?.images || [],
         followUpSuggestions: parsed.suggestions,
         usedWebSearch: needsWeb 
       };
+      responseCache.set(cacheKey, resPayload);
+      return resPayload;
     }
 
-    // Fallback Local EdTech Engine (When Cloud API keys are unconfigured / invalid)
+    // Fallback Local EdTech Engine (When Cloud API keys hit limits)
     const fallbackResult = synthesizeEdTechResponse(params, webData);
     const parsedFallback = parseFollowUps(fallbackResult.text);
 
-    let setupNotice = '';
-    if (!isValidKey(geminiKey) && !isValidKey(nvidiaKey)) {
-      setupNotice = `> 💡 **Developer Note**: Add a valid Gemini API key to \`.env\` (\`VITE_GEMINI_API_KEY=AIza...\`) to enable live Google Gemini AI reasoning. Running in local EdTech mode.\n\n`;
-    }
-
-    return {
-      answer: setupNotice + parsedFallback.cleanText,
+    const resPayload: AIResponse = {
+      answer: parsedFallback.cleanText,
       citations: (fallbackResult.citations && fallbackResult.citations.length > 0) ? fallbackResult.citations : citations,
       webImages: fallbackResult.webImages || webData?.images || [],
       followUpSuggestions: parsedFallback.suggestions,
       usedWebSearch: needsWeb,
       isOfflineFallback: true
     };
+    responseCache.set(cacheKey, resPayload);
+    return resPayload;
   },
 };
 

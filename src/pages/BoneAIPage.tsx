@@ -246,6 +246,7 @@ export const BoneAIPage: React.FC = () => {
           currentRoute={currentRoute}
           onToggleSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
           onNewChat={handleNewChat}
+          isPopup={false}
         />
       </div>
 

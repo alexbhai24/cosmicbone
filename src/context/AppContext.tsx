@@ -59,6 +59,8 @@ interface AppContextType {
   setIsBoneAIOpen: (open: boolean) => void;
   isBoneAIEnabled: boolean;
   setIsBoneAIEnabled: (enabled: boolean) => void;
+  triggerPopupVoiceMode: boolean;
+  setTriggerPopupVoiceMode: (trigger: boolean) => void;
   // Modals state
   activeVideoModal: ContentItem | null;
   setActiveVideoModal: (video: ContentItem | null) => void;
@@ -197,6 +199,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isBoneAIOpen, setIsBoneAIOpen] = useState(false);
+  const [triggerPopupVoiceMode, setTriggerPopupVoiceMode] = useState(false);
   const [isBoneAIEnabled, setIsBoneAIEnabledState] = useState<boolean>(() => {
     return localStorage.getItem('cosmicbone_ai_enabled') !== 'false';
   });
@@ -736,6 +739,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsBoneAIOpen,
         isBoneAIEnabled,
         setIsBoneAIEnabled,
+        triggerPopupVoiceMode,
+        setTriggerPopupVoiceMode,
         activeVideoModal,
         setActiveVideoModal,
         activeDocModal,
